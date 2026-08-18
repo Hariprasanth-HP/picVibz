@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
   Param,
   UploadedFile,
   UseInterceptors,
@@ -42,5 +43,15 @@ export class PhotosController {
   @ApiOperation({ summary: 'List all photos for an event' })
   findAll(@Param('eventId') eventId: string, @Request() req: any) {
     return this.photos.findByEvent(eventId, req.user.id);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Delete a photo from an event' })
+  remove(
+    @Param('eventId') eventId: string,
+    @Param('id') id: string,
+    @Request() req: any,
+  ) {
+    return this.photos.remove(eventId, id, req.user.id);
   }
 }

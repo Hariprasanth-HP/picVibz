@@ -97,4 +97,35 @@ export class PhotosService {
       orderBy: { createdAt: 'desc' },
     });
   }
+
+  async remove(eventId: string, photoId: string, userId: string) {
+    const event = await this.prisma.event.findFirst({
+      where: { id: eventId, createdBy: userId },
+    });
+    if (!event) {
+      throw new NotFoundException('Event not found');
+    }
+
+    const photo = await this.prisma.photo.findFirst({
+      where: { id: photoId, eventId },
+      include: { file: true },
+    });
+    if (!photo) {
+      throw new NotFoundException('Photo not found');
+    }
+
+    const prefix = `uploads/${photo.fileId}`;
+    await Promise.all([
+      this.storage.delete(`${prefix}/original.jpg`),
+      this.storage.delete(`${prefix}/preview.jpg`),
+      this.storage.delete(`${prefix}/thumbnail.jpg`),
+    ]);
+
+    await this.prisma.$transaction([
+      this.prisma.file.delete({ where: { id: photo.fileId } }),
+      this.prisma.photo.delete({ where: { id: photo.id } }),
+    ]);
+
+    return { message: 'Photo deleted successfully' };
+  }
 }

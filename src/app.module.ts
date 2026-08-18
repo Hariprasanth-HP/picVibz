@@ -3,6 +3,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { PrismaModule } from './prisma/prisma.module';
+import { SupabaseModule } from './supabase/supabase.module';
 import { HealthModule } from './health/health.module';
 import { FilesModule } from './files/files.module';
 import { PhotosModule } from './photos/photos.module';
@@ -23,6 +24,7 @@ import { EventsModule } from './events/events.module';
       },
     ]),
     PrismaModule,
+    SupabaseModule,
     HealthModule,
     AuthModule,
     EventsModule,

@@ -6,53 +6,29 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String?
-  displayName  String
-  photoURL     String?
-  provider     String   @default("email")
-  providerId   String?
-  role         String   @default("user")
-  eventPasses  Int      @default(0)
-  autoUpload   Boolean  @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id          String   @id @default(cuid())
+  supabaseUid String?  @unique
+  email       String   @unique
+  displayName String
+  photoURL    String?
+  role        String   @default("user")
+  eventPasses Int      @default(0)
+  autoUpload  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   photos Photo[]
 
   @@index([email])
+  @@index([supabaseUid])
 }
 
-model PasswordResetToken {
-  id        String   @id @default(cuid())
-  email     String
-  token     String   @unique
-  expiresAt DateTime
-  used      Boolean  @default(false)
-  createdAt DateTime @default(now())
 
-  @@index([token])
-  @@index([email])
-}
-
-model Product {
-  id          Int      @id @default(autoincrement())
-  name        String   @db.VarChar(255)
-  description String?  @db.Text
-  price       Float
-  stock       Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@index([name])
-  @@index([price])
-}
 
 model Event {
   id         String   @id @default(cuid())

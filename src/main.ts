@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import type { CorsOptions } from '@nestjs/common/interfaces/external/cors-options.interface';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import compression from 'compression';
 import helmet from 'helmet';
@@ -14,11 +15,21 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api/v1');
 
-  app.enableCors({
-    origin: process.env.CORS_ORIGIN || '*',
+  const corsOrigin = (process.env.CORS_ORIGIN || '*').split(',').map((o) => o.trim());
+
+  const corsOptions: CorsOptions = {
+    origin: (origin, callback) => {
+      if (!origin || corsOrigin.includes('*') || corsOrigin.includes(origin)) {
+        callback(null, origin || true);
+      } else {
+        callback(new Error(`Origin ${origin} not allowed by CORS`));
+      }
+    },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: true,
-  });
+  };
+
+  app.enableCors(corsOptions);
 
   app.use(helmet());
   app.use(compression());
