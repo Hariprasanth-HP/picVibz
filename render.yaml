@@ -1,0 +1,67 @@
+services:
+  # 1. PostgreSQL Database
+  - type: pserv
+    name: picvibz-db
+    plan: starter
+    region: oregon
+    databases:
+      - name: picvibz
+        databaseName: picvibz
+        user: picvibz
+
+  # 2. Redis for BullMQ
+  - type: redis
+    name: picvibz-redis
+    plan: starter
+    region: oregon
+    maxmemoryPolicy: allkeys-lru
+
+  # 3. Web Service (API)
+  - type: web
+    name: picvibz-api
+    runtime: docker
+    plan: starter
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "8080"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: picvibz-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: picvibz-redis
+          property: connectionString
+      - key: CORS_ORIGIN
+        value: "https://picvibz.netlify.app"
+      - key: FRONTEND_URL
+        value: "https://picvibz.netlify.app"
+    healthCheckPath: /api/v1/health
+    autoDeploy: true
+
+  # 4. Background Worker
+  - type: worker
+    name: picvibz-worker
+    runtime: docker
+    plan: starter
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerCommand: "node dist/worker.js"
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: picvibz-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: picvibz-redis
+          property: connectionString
+    autoDeploy: true
