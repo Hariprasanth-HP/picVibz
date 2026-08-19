@@ -1,13 +1,13 @@
-import typescriptEslint from '@typescript-eslint/eslint-plugin';
-import typescriptParser from '@typescript-eslint/parser';
-import prettier from 'eslint-plugin-prettier';
+const typescriptEslint = require('@typescript-eslint/eslint-plugin');
+const typescriptParser = require('@typescript-eslint/parser');
+const prettier = require('eslint-plugin-prettier');
 
-export default [
+module.exports = [
   {
     files: ['**/*.ts'],
     languageOptions: {
       parser: typescriptParser,
-      parserOptions: { project: 'tsconfig.json', tsconfigRootDir: import.meta.dirname },
+      parserOptions: { project: 'tsconfig.json', tsconfigRootDir: __dirname },
     },
     plugins: { '@typescript-eslint': typescriptEslint, prettier },
     rules: {
@@ -18,5 +18,5 @@ export default [
       'prettier/prettier': 'error',
     },
   },
-  { ignores: ['dist', 'eslint.config.js'] },
+  { ignores: ['dist', 'eslint.config.cjs'] },
 ];

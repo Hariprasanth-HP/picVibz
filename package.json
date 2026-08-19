@@ -3,7 +3,6 @@
   "version": "0.1.0",
   "description": "NestJS backend with health check, rate limiting, validation, and more",
   "private": true,
-  "type": "module",
   "scripts": {
     "build": "prisma generate && nest build",
     "start": "nest start",
