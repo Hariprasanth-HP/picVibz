@@ -40,6 +40,8 @@ export class MediaQueueService {
       useFactory: (config: ConfigService) => ({
         connection: {
           url: config.get<string>('REDIS_URL', 'redis://localhost:6379'),
+          maxRetriesPerRequest: null,
+          enableOfflineQueue: false,
         },
       }),
     }),

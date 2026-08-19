@@ -1,0 +1,13 @@
+# HTTP-only (no domain yet). Copy to the VM at /etc/caddy/Caddyfile.
+# Access your API at http://<ELASTIC_IP>
+:80 {
+	reverse_proxy 127.0.0.1:8080
+}
+
+# When you have a domain: point its A record at the EC2 Elastic IP,
+# uncomment the block below (and remove the :80 block) and Caddy
+# will provision a free HTTPS certificate automatically.
+#
+# api.yourdomain.com {
+# 	reverse_proxy 127.0.0.1:8080
+# }

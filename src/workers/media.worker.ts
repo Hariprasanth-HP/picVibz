@@ -29,7 +29,11 @@ export class MediaWorker implements OnModuleInit, OnModuleDestroy {
       MEDIA_QUEUE_NAME,
       async (job: Job<MediaJobPayload>) => this.handleJob(job),
       {
-        connection: { url: redisUrl },
+        connection: {
+          url: redisUrl,
+          maxRetriesPerRequest: null,
+          enableOfflineQueue: false,
+        },
         concurrency,
         lockDuration: 300000,
       },

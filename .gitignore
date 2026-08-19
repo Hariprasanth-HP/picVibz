@@ -53,3 +53,6 @@ prisma/migrations/
 .pnpm-store/
 
 opencode.json
+
+# Redis dump (local redis-server only; queue runs on Upstash)
+dump.rdb
