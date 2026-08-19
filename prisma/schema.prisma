@@ -5,6 +5,14 @@ generator client {
   provider = "prisma-client-js"
 }
 
+enum MediaStatus {
+  UPLOADING
+  UPLOADED
+  PROCESSING
+  READY
+  FAILED
+}
+
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
@@ -44,12 +52,13 @@ model Event {
   updatedAt  DateTime @updatedAt
 
   photos Photo[]
+  files  File[]
 
   @@index([createdBy])
 }
 
 model File {
-  id            String   @id @default(cuid())
+  id            String      @id @default(cuid())
   originalName  String
   mimetype      String
   size          Int
@@ -58,9 +67,25 @@ model File {
   originalUrl   String
   previewUrl    String
   thumbnailUrl  String
-  createdAt     DateTime @default(now())
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  userId          String?
+  originalKey     String?
+  mediumKey       String?
+  previewKey      String?
+  duration        Int?
+  processingError String?
+  status          MediaStatus @default(UPLOADING)
+
+  eventId String?
+  event   Event?  @relation(fields: [eventId], references: [id], onDelete: SetNull)
 
   photo Photo?
+
+  @@index([userId])
+  @@index([status])
+  @@index([eventId])
 }
 
 model Photo {

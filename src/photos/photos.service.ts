@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import sharp from 'sharp';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
@@ -12,6 +13,7 @@ export class PhotosService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly config: ConfigService,
   ) {}
 
   async upload(eventId: string, file: Express.Multer.File, userId: string) {
@@ -58,6 +60,7 @@ export class PhotosService {
         originalUrl,
         previewUrl,
         thumbnailUrl,
+        status: 'READY',
       },
     });
 
@@ -86,7 +89,7 @@ export class PhotosService {
       throw new NotFoundException('Event not found');
     }
 
-    return this.prisma.photo.findMany({
+    const photos = await this.prisma.photo.findMany({
       where: { eventId },
       include: {
         file: true,
@@ -96,6 +99,40 @@ export class PhotosService {
       },
       orderBy: { createdAt: 'desc' },
     });
+
+    const expiration = Number(this.config.get('SIGNED_URL_EXPIRATION', '3600'));
+    return Promise.all(
+      photos.map(async (photo) => {
+        const file = photo.file;
+        if (!file.originalKey) {
+          return photo;
+        }
+
+        const ready = file.status === 'READY';
+        const sign = (key: string | null) =>
+          ready && key
+            ? this.storage.createPresignedGetUrl(key, expiration)
+            : Promise.resolve('');
+
+        const [originalUrl, previewUrl, mediumUrl] = await Promise.all([
+          sign(file.originalKey),
+          sign(file.previewKey),
+          sign(file.mediumKey),
+        ]);
+
+        return {
+          ...photo,
+          file: {
+            ...file,
+            status: file.status,
+            originalUrl,
+            previewUrl,
+            thumbnailUrl: previewUrl,
+            mediumUrl,
+          },
+        };
+      }),
+    );
   }
 
   async remove(eventId: string, photoId: string, userId: string) {
@@ -116,8 +153,8 @@ export class PhotosService {
 
     const prefix = `uploads/${photo.fileId}`;
     await Promise.all([
-      this.storage.delete(`${prefix}/original.jpg`),
-      this.storage.delete(`${prefix}/preview.jpg`),
+      this.storage.delete(photo.file.originalKey ?? `${prefix}/original.jpg`),
+      this.storage.delete(photo.file.previewKey ?? `${prefix}/preview.jpg`),
       this.storage.delete(`${prefix}/thumbnail.jpg`),
     ]);
 

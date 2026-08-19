@@ -14,6 +14,7 @@ async function bootstrap() {
   });
 
   app.setGlobalPrefix('api/v1');
+  app.enableShutdownHooks();
 
   const corsOrigin = (process.env.CORS_ORIGIN || '*').split(',').map((o) => o.trim());
 

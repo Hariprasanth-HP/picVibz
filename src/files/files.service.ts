@@ -51,6 +51,7 @@ export class FilesService {
         originalUrl,
         previewUrl,
         thumbnailUrl,
+        status: 'READY',
       },
     });
   }
