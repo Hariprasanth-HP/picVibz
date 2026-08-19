@@ -47,11 +47,7 @@ export class PhotosController {
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete a photo from an event' })
-  remove(
-    @Param('eventId') eventId: string,
-    @Param('id') id: string,
-    @Request() req: any,
-  ) {
+  remove(@Param('eventId') eventId: string, @Param('id') id: string, @Request() req: any) {
     return this.photos.remove(eventId, id, req.user.id);
   }
 }

@@ -8,11 +8,7 @@ import {
   Request,
   UseGuards,
 } from '@nestjs/common';
-import {
-  ApiBearerAuth,
-  ApiOperation,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { UploadsService } from './uploads.service';
 import { InitUploadDto } from './dto/init-upload.dto';
@@ -32,10 +28,7 @@ export class UploadsController {
 
   @Post(':uploadId/complete')
   @ApiOperation({ summary: 'Complete an upload and enqueue processing' })
-  complete(
-    @Param('uploadId', ParseUUIDPipe) uploadId: string,
-    @Request() req: any,
-  ) {
+  complete(@Param('uploadId', ParseUUIDPipe) uploadId: string, @Request() req: any) {
     return this.uploads.complete(req.user.id, uploadId);
   }
 

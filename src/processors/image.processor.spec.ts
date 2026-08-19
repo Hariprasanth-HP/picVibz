@@ -1,11 +1,7 @@
 import { Test } from '@nestjs/testing';
 import sharp from 'sharp';
 import { StorageService } from '../storage/storage.service';
-import {
-  ImageProcessor,
-  MEDIUM_MAX_WIDTH,
-  PREVIEW_MAX_WIDTH,
-} from './image.processor';
+import { ImageProcessor, MEDIUM_MAX_WIDTH, PREVIEW_MAX_WIDTH } from './image.processor';
 
 describe('ImageProcessor', () => {
   let processor: ImageProcessor;

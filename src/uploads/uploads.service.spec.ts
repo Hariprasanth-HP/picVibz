@@ -1,9 +1,5 @@
 import { Test } from '@nestjs/testing';
-import {
-  BadRequestException,
-  NotFoundException,
-  PayloadTooLargeException,
-} from '@nestjs/common';
+import { BadRequestException, NotFoundException, PayloadTooLargeException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
@@ -80,9 +76,7 @@ describe('UploadsService', () => {
         data: expect.objectContaining({
           userId: 'user-1',
           status: 'UPLOADING',
-          originalKey: expect.stringContaining(
-            'users/user-1/photos/',
-          ) as unknown as string,
+          originalKey: expect.stringContaining('users/user-1/photos/') as unknown as string,
         }),
       });
       expect(storage.createPresignedPutUrl).toHaveBeenCalledWith(
@@ -93,9 +87,7 @@ describe('UploadsService', () => {
       expect(result).toEqual(
         expect.objectContaining({
           uploadId: 'file-1',
-          storageKey: expect.stringContaining(
-            'users/user-1/photos/',
-          ) as unknown as string,
+          storageKey: expect.stringContaining('users/user-1/photos/') as unknown as string,
           status: 'UPLOADING',
           uploadUrl: 'https://signed.put/url',
         }),
@@ -177,9 +169,7 @@ describe('UploadsService', () => {
         mimetype: 'image/jpeg',
       });
 
-      await expect(service.complete('user-A', 'file-1')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(service.complete('user-A', 'file-1')).rejects.toThrow(NotFoundException);
       expect(mediaQueue.addMediaJob).not.toHaveBeenCalled();
     });
 
@@ -275,9 +265,7 @@ describe('UploadsService', () => {
       });
       storage.headObject.mockResolvedValue({ exists: false, size: null, contentType: null });
 
-      await expect(service.complete('user-1', 'file-1')).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(service.complete('user-1', 'file-1')).rejects.toThrow(BadRequestException);
       expect(mediaQueue.addMediaJob).not.toHaveBeenCalled();
     });
   });
@@ -298,9 +286,7 @@ describe('UploadsService', () => {
         duration: null,
       });
 
-      await expect(service.findOne('user-A', 'file-1')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(service.findOne('user-A', 'file-1')).rejects.toThrow(NotFoundException);
     });
 
     it('findOne only returns signed URLs for READY media', async () => {

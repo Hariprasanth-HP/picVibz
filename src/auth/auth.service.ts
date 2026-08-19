@@ -21,7 +21,11 @@ export class AuthService {
     private readonly config: ConfigService,
   ) {}
 
-  private async findOrCreateUser(supabaseUser: { id: string; email?: string; user_metadata?: { full_name?: string; avatar_url?: string; name?: string } }) {
+  private async findOrCreateUser(supabaseUser: {
+    id: string;
+    email?: string;
+    user_metadata?: { full_name?: string; avatar_url?: string; name?: string };
+  }) {
     const email = supabaseUser.email ?? '';
     let user = await this.prisma.user.findUnique({ where: { supabaseUid: supabaseUser.id } });
 
@@ -122,15 +126,11 @@ export class AuthService {
   }
 
   async forgotPassword(dto: ForgotPasswordDto) {
-    const redirectUrl = this.config.get<string>(
-      'FRONTEND_URL',
-      'http://localhost:3001',
-    );
+    const redirectUrl = this.config.get<string>('FRONTEND_URL', 'http://localhost:3001');
 
-    const { error } = await this.supabase.client.auth.resetPasswordForEmail(
-      dto.email,
-      { redirectTo: `${redirectUrl}/reset-password` },
-    );
+    const { error } = await this.supabase.client.auth.resetPasswordForEmail(dto.email, {
+      redirectTo: `${redirectUrl}/reset-password`,
+    });
 
     if (error) {
       console.error('Failed to send reset email:', error.message);

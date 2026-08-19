@@ -42,11 +42,7 @@ export class EventsController {
 
   @Patch(':id')
   @ApiOperation({ summary: 'Update an event' })
-  update(
-    @Param('id') id: string,
-    @Body() dto: UpdateEventDto,
-    @Request() req: any,
-  ) {
+  update(@Param('id') id: string, @Body() dto: UpdateEventDto, @Request() req: any) {
     return this.events.update(id, dto, req.user.id);
   }
 

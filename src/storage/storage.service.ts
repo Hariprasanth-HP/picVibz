@@ -45,21 +45,15 @@ export class StorageService {
         ContentType: mimetype,
       }),
     );
-    return this.publicUrl
-      ? `${this.publicUrl}/${key}`
-      : `https://${this.bucket}.r2.dev/${key}`;
+    return this.publicUrl ? `${this.publicUrl}/${key}` : `https://${this.bucket}.r2.dev/${key}`;
   }
 
   async delete(key: string): Promise<void> {
-    await this.client.send(
-      new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
-    );
+    await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
   }
 
   async download(key: string): Promise<Buffer> {
-    const res = await this.client.send(
-      new GetObjectCommand({ Bucket: this.bucket, Key: key }),
-    );
+    const res = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
     const chunks: Uint8Array[] = [];
     const body = res.Body as AsyncIterable<Uint8Array> | undefined;
     if (body) {
@@ -74,9 +68,7 @@ export class StorageService {
     key: string,
   ): Promise<{ exists: boolean; size: number | null; contentType: string | null }> {
     try {
-      const res = await this.client.send(
-        new HeadObjectCommand({ Bucket: this.bucket, Key: key }),
-      );
+      const res = await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));
       return {
         exists: true,
         size: res.ContentLength ?? null,
@@ -109,10 +101,8 @@ export class StorageService {
   }
 
   async createPresignedGetUrl(key: string, expiresInSeconds: number): Promise<string> {
-    return getSignedUrl(
-      this.client,
-      new GetObjectCommand({ Bucket: this.bucket, Key: key }),
-      { expiresIn: expiresInSeconds },
-    );
+    return getSignedUrl(this.client, new GetObjectCommand({ Bucket: this.bucket, Key: key }), {
+      expiresIn: expiresInSeconds,
+    });
   }
 }

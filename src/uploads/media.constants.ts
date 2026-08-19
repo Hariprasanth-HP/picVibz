@@ -6,11 +6,7 @@ export const ALLOWED_IMAGE_MIME_TYPES = [
   'image/heif',
 ];
 
-export const ALLOWED_VIDEO_MIME_TYPES = [
-  'video/mp4',
-  'video/quicktime',
-  'video/webm',
-];
+export const ALLOWED_VIDEO_MIME_TYPES = ['video/mp4', 'video/quicktime', 'video/webm'];
 
 export const ALLOWED_MIME_TYPES = new Set([
   ...ALLOWED_IMAGE_MIME_TYPES,

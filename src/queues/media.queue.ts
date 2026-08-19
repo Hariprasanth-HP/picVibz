@@ -17,9 +17,7 @@ export interface MediaJobPayload {
 export class MediaQueueService {
   private readonly logger = new Logger(MediaQueueService.name);
 
-  constructor(
-    @InjectQueue(MEDIA_QUEUE_NAME) private readonly queue: Queue,
-  ) {}
+  constructor(@InjectQueue(MEDIA_QUEUE_NAME) private readonly queue: Queue) {}
 
   async addMediaJob(payload: MediaJobPayload): Promise<string> {
     const job = await this.queue.add(MEDIA_JOB_NAME, payload, {

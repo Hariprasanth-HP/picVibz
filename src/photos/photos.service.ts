@@ -110,9 +110,7 @@ export class PhotosService {
 
         const ready = file.status === 'READY';
         const sign = (key: string | null) =>
-          ready && key
-            ? this.storage.createPresignedGetUrl(key, expiration)
-            : Promise.resolve('');
+          ready && key ? this.storage.createPresignedGetUrl(key, expiration) : Promise.resolve('');
 
         const [originalUrl, previewUrl, mediumUrl] = await Promise.all([
           sign(file.originalKey),
@@ -151,16 +149,22 @@ export class PhotosService {
       throw new NotFoundException('Photo not found');
     }
 
-    const prefix = `uploads/${photo.fileId}`;
-    await Promise.all([
-      this.storage.delete(photo.file.originalKey ?? `${prefix}/original.jpg`),
-      this.storage.delete(photo.file.previewKey ?? `${prefix}/preview.jpg`),
-      this.storage.delete(`${prefix}/thumbnail.jpg`),
-    ]);
+    const keys = new Set<string>();
+    if (photo.file.originalKey) {
+      keys.add(photo.file.originalKey);
+      if (photo.file.previewKey) keys.add(photo.file.previewKey);
+      if (photo.file.mediumKey) keys.add(photo.file.mediumKey);
+    } else {
+      keys.add(`uploads/${photo.fileId}/original.jpg`);
+      keys.add(`uploads/${photo.fileId}/preview.jpg`);
+      keys.add(`uploads/${photo.fileId}/thumbnail.jpg`);
+    }
+
+    await Promise.all([...keys].map((key) => this.storage.delete(key)));
 
     await this.prisma.$transaction([
-      this.prisma.file.delete({ where: { id: photo.fileId } }),
       this.prisma.photo.delete({ where: { id: photo.id } }),
+      this.prisma.file.delete({ where: { id: photo.fileId } }),
     ]);
 
     return { message: 'Photo deleted successfully' };

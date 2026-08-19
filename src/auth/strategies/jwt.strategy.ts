@@ -20,8 +20,7 @@ interface Jwk {
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  private jwksCache: { fetchedAt: number; keys: Map<string, string> } | null =
-    null;
+  private jwksCache: { fetchedAt: number; keys: Map<string, string> } | null = null;
 
   constructor(
     config: ConfigService,

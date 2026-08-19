@@ -35,9 +35,7 @@ export class UploadsService {
       throw new BadRequestException(`Unsupported media type: ${dto.mimeType}`);
     }
     if (dto.size > this.uploadMaxSize) {
-      throw new PayloadTooLargeException(
-        `File size exceeds limit of ${this.uploadMaxSize} bytes`,
-      );
+      throw new PayloadTooLargeException(`File size exceeds limit of ${this.uploadMaxSize} bytes`);
     }
 
     let eventId: string | undefined;

@@ -41,9 +41,7 @@ export class VideoProcessor {
       const duration = await this.probeDuration(videoPath);
 
       if (previewHead.exists) {
-        this.logger.log(
-          `Poster already exists, skipping fileId=${fileId} preview=${previewKey}`,
-        );
+        this.logger.log(`Poster already exists, skipping fileId=${fileId} preview=${previewKey}`);
         return { mediumKey: null, previewKey, width: null, height: null, duration };
       }
 

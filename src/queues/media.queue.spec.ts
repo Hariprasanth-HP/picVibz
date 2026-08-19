@@ -8,10 +8,7 @@ describe('MediaQueueService', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     const moduleRef = await Test.createTestingModule({
-      providers: [
-        MediaQueueService,
-        { provide: 'BullQueue_media-processing', useValue: queue },
-      ],
+      providers: [MediaQueueService, { provide: 'BullQueue_media-processing', useValue: queue }],
     }).compile();
     service = moduleRef.get(MediaQueueService);
   });

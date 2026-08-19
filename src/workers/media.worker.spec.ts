@@ -34,7 +34,9 @@ describe('MediaWorker', () => {
         MediaWorker,
         {
           provide: ConfigService,
-          useValue: { get: jest.fn((key: string) => key === 'MEDIA_WORKER_CONCURRENCY' ? '3' : undefined) },
+          useValue: {
+            get: jest.fn((key: string) => (key === 'MEDIA_WORKER_CONCURRENCY' ? '3' : undefined)),
+          },
         },
         { provide: PrismaService, useValue: prisma },
         { provide: StorageService, useValue: storage },

@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  OnModuleDestroy,
-  OnModuleInit,
-} from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Job, Worker } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
@@ -11,10 +6,7 @@ import { StorageService } from '../storage/storage.service';
 import { ImageProcessor } from '../processors/image.processor';
 import { VideoProcessor } from '../processors/video.processor';
 import { MEDIA_QUEUE_NAME, MediaJobPayload } from '../queues/media.queue';
-import {
-  isImageMimeType,
-  isVideoMimeType,
-} from '../uploads/media.constants';
+import { isImageMimeType, isVideoMimeType } from '../uploads/media.constants';
 
 @Injectable()
 export class MediaWorker implements OnModuleInit, OnModuleDestroy {
@@ -30,13 +22,8 @@ export class MediaWorker implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    const redisUrl = this.config.get<string>(
-      'REDIS_URL',
-      'redis://localhost:6379',
-    );
-    const concurrency = Number(
-      this.config.get('MEDIA_WORKER_CONCURRENCY', '3'),
-    ) || 3;
+    const redisUrl = this.config.get<string>('REDIS_URL', 'redis://localhost:6379');
+    const concurrency = Number(this.config.get('MEDIA_WORKER_CONCURRENCY', '3')) || 3;
 
     this.worker = new Worker(
       MEDIA_QUEUE_NAME,
@@ -49,13 +36,9 @@ export class MediaWorker implements OnModuleInit, OnModuleDestroy {
     );
 
     this.worker.on('failed', (job, err) => this.handleFailed(job, err));
-    this.worker.on('error', (err) =>
-      this.logger.error('Media worker connection error', err),
-    );
+    this.worker.on('error', (err) => this.logger.error('Media worker connection error', err));
 
-    this.logger.log(
-      `Media worker started queue=${MEDIA_QUEUE_NAME} concurrency=${concurrency}`,
-    );
+    this.logger.log(`Media worker started queue=${MEDIA_QUEUE_NAME} concurrency=${concurrency}`);
   }
 
   async onModuleDestroy() {
@@ -80,9 +63,7 @@ export class MediaWorker implements OnModuleInit, OnModuleDestroy {
         ? (await this.storage.headObject(file.previewKey)).exists
         : true;
       if (mediumExists && previewExists) {
-        this.logger.log(
-          `Already READY, skipping duplicate job jobId=${job.id} fileId=${fileId}`,
-        );
+        this.logger.log(`Already READY, skipping duplicate job jobId=${job.id} fileId=${fileId}`);
         return;
       }
     }
@@ -110,9 +91,7 @@ export class MediaWorker implements OnModuleInit, OnModuleDestroy {
         mimeType,
       });
     } else {
-      throw new Error(
-        `Unsupported media type mimeType=${mimeType} fileId=${fileId}`,
-      );
+      throw new Error(`Unsupported media type mimeType=${mimeType} fileId=${fileId}`);
     }
 
     await this.prisma.file.update({
@@ -135,10 +114,7 @@ export class MediaWorker implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  async handleFailed(
-    job: Job<MediaJobPayload> | undefined,
-    err: Error,
-  ): Promise<void> {
+  async handleFailed(job: Job<MediaJobPayload> | undefined, err: Error): Promise<void> {
     if (!job) return;
     const attempts = job.opts.attempts ?? 1;
     if (job.attemptsMade >= attempts) {
@@ -152,10 +128,7 @@ export class MediaWorker implements OnModuleInit, OnModuleDestroy {
           err.stack,
         );
       } catch (updateErr) {
-        this.logger.error(
-          `Failed to persist failure state fileId=${job.data.fileId}`,
-          updateErr,
-        );
+        this.logger.error(`Failed to persist failure state fileId=${job.data.fileId}`, updateErr);
       }
     }
   }

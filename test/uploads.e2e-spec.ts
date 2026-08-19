@@ -1,9 +1,5 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
-import {
-  CanActivate,
-  ExecutionContext,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { CanActivate, ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -36,8 +32,9 @@ describe('Uploads (e2e)', () => {
     },
   };
   const storage = {
-    buildKey: jest.fn((userId: string, fileId: string, variant: string) =>
-      `users/${userId}/photos/${fileId}/${variant}`,
+    buildKey: jest.fn(
+      (userId: string, fileId: string, variant: string) =>
+        `users/${userId}/photos/${fileId}/${variant}`,
     ),
     createPresignedPutUrl: jest.fn().mockResolvedValue('https://signed.put/url'),
     createPresignedGetUrl: jest.fn().mockResolvedValue('https://signed.get/url'),
