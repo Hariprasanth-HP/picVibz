@@ -17,73 +17,138 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Load ENV_FILE
+      - name: Extract EC2 connection variables
         shell: bash
         env:
           ENV_FILE_CONTENT: ${{ secrets.ENV_FILE }}
         run: |
           printf '%s\n' "$ENV_FILE_CONTENT" > .env
 
-          set -a
-          source .env
-          set +a
+          EC2_HOST=$(grep '^EC2_HOST=' .env | cut -d '=' -f2-)
+          EC2_USER=$(grep '^EC2_USER=' .env | cut -d '=' -f2-)
+
+          if [ -z "$EC2_HOST" ]; then
+            echo "ERROR: EC2_HOST is missing from ENV_FILE"
+            exit 1
+          fi
+
+          if [ -z "$EC2_USER" ]; then
+            echo "ERROR: EC2_USER is missing from ENV_FILE"
+            exit 1
+          fi
 
           echo "EC2_HOST=$EC2_HOST" >> "$GITHUB_ENV"
           echo "EC2_USER=$EC2_USER" >> "$GITHUB_ENV"
 
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          ENV_FILE_CONTENT: ${{ secrets.ENV_FILE }}
         with:
           host: ${{ env.EC2_HOST }}
           username: ${{ env.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
+          envs: ENV_FILE_CONTENT
+
           script: |
             set -e
 
             cd ~/picVibz
 
-            # Make Git use the deploy key on EC2
+            # ------------------------------------------------
+            # Configure EC2 -> GitHub authentication
+            # ------------------------------------------------
             git config --local core.sshCommand \
               "ssh -i ~/.ssh/github_deploy -o IdentitiesOnly=yes"
 
-            # Get latest code FIRST
+            # ------------------------------------------------
+            # Get latest code
+            # ------------------------------------------------
             echo "Fetching latest code..."
-            git fetch origin main || { echo "ERROR: Git fetch failed - check deploy key permissions"; exit 1; }
+
+            git fetch origin main
+
             git reset --hard origin/main
-            git clean -fd  # Remove untracked files and directories
 
-            # Verify clean state - fail if any issues
+            git clean -fd
+
+            # ------------------------------------------------
+            # Verify repository state
+            # ------------------------------------------------
             echo "Verifying git state..."
-            git status --porcelain | grep -q . && { echo "ERROR: Working tree not clean"; exit 1; }
-            
-            # Verify deleted files are actually gone
-            test ! -f src/worker.ts || { echo "ERROR: src/worker.ts still exists!"; exit 1; }
-            test ! -d src/workers || { echo "ERROR: src/workers/ still exists!"; exit 1; }
-            test ! -d src/queues || { echo "ERROR: src/queues/ still exists!"; exit 1; }
-            test ! -d src/processors || { echo "ERROR: src/processors/ still exists!"; exit 1; }
 
-            # Verify commit matches origin/main
+            if [ -n "$(git status --porcelain)" ]; then
+              echo "ERROR: Working tree is not clean"
+              git status --porcelain
+              exit 1
+            fi
+
             CURRENT_COMMIT=$(git rev-parse HEAD)
             EXPECTED_COMMIT=$(git ls-remote origin main | cut -f1)
-            [ "$CURRENT_COMMIT" = "$EXPECTED_COMMIT" ] || { echo "ERROR: Commit mismatch! Current=$CURRENT_COMMIT Expected=$EXPECTED_COMMIT"; exit 1; }
 
-            # Debug output
-            echo "Git status: OK"
-            echo "Current commit: $(git rev-parse HEAD)"
-            echo "Source directories verified deleted"
+            if [ "$CURRENT_COMMIT" != "$EXPECTED_COMMIT" ]; then
+              echo "ERROR: Commit mismatch"
+              echo "Current:  $CURRENT_COMMIT"
+              echo "Expected: $EXPECTED_COMMIT"
+              exit 1
+            fi
 
-            # Cleanup build artifacts
+            echo "Commit: $CURRENT_COMMIT"
+
+            # ------------------------------------------------
+            # Write GitHub ENV_FILE to EC2
+            # ------------------------------------------------
+            echo "Updating EC2 .env..."
+
+            printf '%s\n' "$ENV_FILE_CONTENT" > .env
+
+            # Don't print the file because it contains secrets.
+
+            # Verify required variable exists without printing
+            if ! grep -q '^IMAGE_WORKER_URL=' .env; then
+              echo "ERROR: IMAGE_WORKER_URL missing from EC2 .env"
+              exit 1
+            fi
+
+            echo "Required environment configuration found"
+
+            # ------------------------------------------------
+            # Cleanup old build artifacts
+            # ------------------------------------------------
             rm -rf node_modules
             rm -rf dist
 
+            # ------------------------------------------------
+            # Stop current containers
+            # ------------------------------------------------
+            sudo docker compose down
+
+            # ------------------------------------------------
             # Clear Docker builder cache
+            # ------------------------------------------------
             echo "Clearing Docker builder cache..."
+
             sudo docker builder prune -a -f
 
-            # Rebuild and restart API
+            # ------------------------------------------------
+            # Rebuild completely
+            # ------------------------------------------------
+            echo "Building Docker image..."
+
             sudo docker compose build --no-cache
+
+            # ------------------------------------------------
+            # Start application
+            # ------------------------------------------------
+            echo "Starting containers..."
+
             sudo docker compose up -d
+
+            # ------------------------------------------------
+            # Show status
+            # ------------------------------------------------
+            sudo docker compose ps
 
   # ============================================================
   # DEPLOY CLOUDFLARE WORKER
@@ -95,20 +160,37 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Load ENV_FILE
+      - name: Extract Cloudflare variables
         shell: bash
         env:
           ENV_FILE_CONTENT: ${{ secrets.ENV_FILE }}
         run: |
           printf '%s\n' "$ENV_FILE_CONTENT" > .env
 
-          set -a
-          source .env
-          set +a
+          CLOUDFLARE_API_TOKEN=$(grep '^CLOUDFLARE_API_TOKEN=' .env | cut -d '=' -f2-)
+          CLOUDFLARE_ACCOUNT_ID=$(grep '^CLOUDFLARE_ACCOUNT_ID=' .env | cut -d '=' -f2-)
+          IMAGE_SIGNING_SECRET=$(grep '^IMAGE_SIGNING_SECRET=' .env | cut -d '=' -f2-)
 
-          echo "CLOUDFLARE_API_TOKEN=$CLOUDFLARE_API_TOKEN" >> "$GITHUB_ENV"
-          echo "CLOUDFLARE_ACCOUNT_ID=$CLOUDFLARE_ACCOUNT_ID" >> "$GITHUB_ENV"
-          echo "IMAGE_SIGNING_SECRET=$IMAGE_SIGNING_SECRET" >> "$GITHUB_ENV"
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "ERROR: CLOUDFLARE_API_TOKEN missing"
+            exit 1
+          fi
+
+          if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "ERROR: CLOUDFLARE_ACCOUNT_ID missing"
+            exit 1
+          fi
+
+          if [ -z "$IMAGE_SIGNING_SECRET" ]; then
+            echo "ERROR: IMAGE_SIGNING_SECRET missing"
+            exit 1
+          fi
+
+          {
+            echo "CLOUDFLARE_API_TOKEN=$CLOUDFLARE_API_TOKEN"
+            echo "CLOUDFLARE_ACCOUNT_ID=$CLOUDFLARE_ACCOUNT_ID"
+            echo "IMAGE_SIGNING_SECRET=$IMAGE_SIGNING_SECRET"
+          } >> "$GITHUB_ENV"
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -130,6 +212,9 @@ jobs:
       - name: Check Wrangler
         run: wrangler --version
 
+      # --------------------------------------------------------
+      # Upload secret to Cloudflare Worker
+      # --------------------------------------------------------
       - name: Set Worker secret
         run: |
           printf '%s' "$IMAGE_SIGNING_SECRET" | \
@@ -139,6 +224,9 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ env.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
 
+      # --------------------------------------------------------
+      # Deploy Worker
+      # --------------------------------------------------------
       - name: Deploy Worker
         run: |
           wrangler deploy --env production
