@@ -47,13 +47,24 @@ jobs:
             git config --local core.sshCommand \
               "ssh -i ~/.ssh/github_deploy -o IdentitiesOnly=yes"
 
-            # Get latest code
-            git fetch origin main
+            # Get latest code FIRST (before cleanup)
+            echo "Fetching latest code..."
+            git fetch origin main || { echo "Git fetch failed - check deploy key"; exit 1; }
             git reset --hard origin/main
 
-             # Remove old host dependencies/build artifacts
+            # Verify clean state
+            echo "Git status:"
+            git status
+            echo "Source directories:"
+            ls -la src/processors/ src/queues/ src/workers/ 2>/dev/null || echo "Directories don't exist (expected)"
+
+            # Cleanup build artifacts
             rm -rf node_modules
             rm -rf dist
+
+            # Clear Docker builder cache
+            echo "Clearing Docker builder cache..."
+            sudo docker builder prune -a -f
 
             # Rebuild and restart API (no cache to pick up deleted files)
             sudo docker compose build --no-cache
