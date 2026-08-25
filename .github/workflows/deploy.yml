@@ -3,7 +3,6 @@ name: Deploy
 on:
   push:
     branches: [main]
-
   workflow_dispatch:
 
 concurrency:
@@ -11,6 +10,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # ============================================================
+  # DEPLOY NODE.JS API TO EC2
+  # ============================================================
   deploy-api:
     runs-on: ubuntu-latest
 
@@ -36,17 +38,25 @@ jobs:
           username: ${{ env.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
-
           script: |
             set -e
 
             cd ~/picVibz
 
+            # Make Git use the deploy key on EC2
+            git config --local core.sshCommand \
+              "ssh -i ~/.ssh/github_deploy -o IdentitiesOnly=yes"
+
+            # Get latest code
             git fetch origin main
             git reset --hard origin/main
 
+            # Rebuild and restart API
             sudo docker compose up -d --build
 
+  # ============================================================
+  # DEPLOY CLOUDFLARE WORKER
+  # ============================================================
   deploy-worker:
     runs-on: ubuntu-latest
 
@@ -74,19 +84,25 @@ jobs:
         with:
           run_install: false
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: "pnpm"
 
-      - name: Install dependencies
+      - name: Install project dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Install Wrangler
+        run: pnpm add --global wrangler
+
+      - name: Check Wrangler
+        run: wrangler --version
 
       - name: Set Worker secret
         run: |
           printf '%s' "$IMAGE_SIGNING_SECRET" | \
-            pnpm exec wrangler secret put IMAGE_SIGNING_SECRET \
+            wrangler secret put IMAGE_SIGNING_SECRET \
             --env production
         env:
           CLOUDFLARE_API_TOKEN: ${{ env.CLOUDFLARE_API_TOKEN }}
@@ -94,7 +110,7 @@ jobs:
 
       - name: Deploy Worker
         run: |
-          pnpm exec wrangler deploy --env production
+          wrangler deploy --env production
         env:
           CLOUDFLARE_API_TOKEN: ${{ env.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
