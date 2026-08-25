@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  deploy-api:
     runs-on: ubuntu-latest
     steps:
       - name: Deploy via SSH
@@ -26,3 +26,23 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
             sudo docker compose up -d --build
+
+  deploy-worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - name: Install Wrangler
+        run: pnpm install -g wrangler
+      - name: Deploy Worker
+        run: wrangler deploy --env production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          IMAGE_SIGNING_SECRET: ${{ secrets.IMAGE_SIGNING_SECRET }}

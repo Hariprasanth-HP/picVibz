@@ -9,7 +9,7 @@ import { randomUUID } from 'crypto';
 import type { File as MediaFile } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
-import { MediaQueueService } from '../queues/media.queue';
+import { ImageUrlSigner } from '../common/utils/image-url-signer';
 import { InitUploadDto } from './dto/init-upload.dto';
 import { isAllowedMimeType } from './media.constants';
 
@@ -18,8 +18,8 @@ export class UploadsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
-    private readonly mediaQueue: MediaQueueService,
     private readonly config: ConfigService,
+    private readonly urlSigner: ImageUrlSigner,
   ) {}
 
   private get uploadMaxSize(): number {
@@ -27,7 +27,7 @@ export class UploadsService {
   }
 
   private get signedUrlExpiration(): number {
-    return Number(this.config.get('SIGNED_URL_EXPIRATION', '3600'));
+    return Number(this.config.get('SIGNED_URL_EXPIRATION', '300'));
   }
 
   async init(userId: string, dto: InitUploadDto) {
@@ -91,7 +91,7 @@ export class UploadsService {
       throw new NotFoundException('Upload not found');
     }
 
-    if (file.status === 'PROCESSING' || file.status === 'READY') {
+    if (file.status === 'READY') {
       return { id: file.id, status: file.status };
     }
 
@@ -119,19 +119,16 @@ export class UploadsService {
       }
     }
 
-    await this.mediaQueue.addMediaJob({
-      fileId: file.id,
-      userId,
-      originalKey: file.originalKey,
-      mimeType: file.mimetype,
-    });
-
     await this.prisma.file.update({
       where: { id: file.id },
-      data: { status: 'PROCESSING' },
+      data: {
+        status: 'READY',
+        width: head.contentType?.startsWith('image/') ? null : null,
+        height: head.contentType?.startsWith('image/') ? null : null,
+      },
     });
 
-    return { id: file.id, status: 'PROCESSING' };
+    return { id: file.id, status: 'READY' };
   }
 
   async findAll(userId: string) {
@@ -150,18 +147,21 @@ export class UploadsService {
     return this.toMediaResponse(file);
   }
 
-  private async toMediaResponse(file: MediaFile) {
+  private toMediaResponse(file: MediaFile) {
     const ready = file.status === 'READY';
-    const sign = (key: string | null) =>
-      ready && key
-        ? this.storage.createPresignedGetUrl(key, this.signedUrlExpiration)
-        : Promise.resolve(null);
-
-    const [previewUrl, mediumUrl, originalUrl] = await Promise.all([
-      sign(file.previewKey ?? null),
-      sign(file.mediumKey ?? null),
-      sign(file.originalKey ?? null),
-    ]);
+    const urls =
+      ready && file.originalKey
+        ? this.urlSigner.signAll(file.originalKey, {
+            mediumKey: file.mediumKey ?? null,
+            previewKey: file.previewKey ?? null,
+            expiresInSeconds: this.signedUrlExpiration,
+          })
+        : {
+            originalUrl: null,
+            mediumUrl: null,
+            previewUrl: null,
+            thumbnailUrl: null,
+          };
 
     return {
       id: file.id,
@@ -172,9 +172,10 @@ export class UploadsService {
       width: file.width,
       height: file.height,
       duration: file.duration,
-      previewUrl,
-      mediumUrl,
-      originalUrl,
+      previewUrl: urls.previewUrl,
+      mediumUrl: urls.mediumUrl,
+      originalUrl: urls.originalUrl,
+      thumbnailUrl: urls.thumbnailUrl,
       createdAt: file.createdAt,
       updatedAt: file.updatedAt,
     };

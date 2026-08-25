@@ -32,7 +32,7 @@ export class StorageService {
     });
   }
 
-  buildKey(userId: string, fileId: string, variant: StorageVariant): string {
+  buildKey(userId: string, fileId: string, variant: StorageVariant = 'original'): string {
     return `users/${userId}/photos/${fileId}/${variant}`;
   }
 
@@ -98,11 +98,5 @@ export class StorageService {
       }),
       { expiresIn: expiresInSeconds },
     );
-  }
-
-  async createPresignedGetUrl(key: string, expiresInSeconds: number): Promise<string> {
-    return getSignedUrl(this.client, new GetObjectCommand({ Bucket: this.bucket, Key: key }), {
-      expiresIn: expiresInSeconds,
-    });
   }
 }

@@ -3,8 +3,8 @@ import { BadRequestException, NotFoundException, PayloadTooLargeException } from
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
-import { MediaQueueService } from '../queues/media.queue';
 import { UploadsService } from './uploads.service';
+import { ImageUrlSigner } from '../common/utils/image-url-signer';
 
 describe('UploadsService', () => {
   let service: UploadsService;
@@ -26,10 +26,11 @@ describe('UploadsService', () => {
   const storage = {
     buildKey: jest.fn(),
     createPresignedPutUrl: jest.fn(),
-    createPresignedGetUrl: jest.fn(),
     headObject: jest.fn(),
   };
-  const mediaQueue = { addMediaJob: jest.fn() };
+  const urlSigner = {
+    signAll: jest.fn(),
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -38,15 +39,46 @@ describe('UploadsService', () => {
         `users/${userId}/photos/${fileId}/${variant}`,
     );
     storage.createPresignedPutUrl.mockResolvedValue('https://signed.put/url');
-    storage.createPresignedGetUrl.mockResolvedValue('https://signed.get/url');
+    urlSigner.signAll.mockReturnValue({
+      originalUrl:
+        'https://worker.dev/image?key=users%2Fuser-1%2Fphotos%2Ffile-1%2Foriginal&size=original&exp=1234567890&sig=abc',
+      mediumUrl:
+        'https://worker.dev/image?key=users%2Fuser-1%2Fphotos%2Ffile-1%2Foriginal&size=medium&exp=1234567890&sig=def',
+      previewUrl:
+        'https://worker.dev/image?key=users%2Fuser-1%2Fphotos%2Ffile-1%2Foriginal&size=preview&exp=1234567890&sig=ghi',
+      thumbnailUrl:
+        'https://worker.dev/image?key=users%2Fuser-1%2Fphotos%2Ffile-1%2Foriginal&size=medium&exp=1234567890&sig=ghi',
+    });
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         UploadsService,
-        { provide: ConfigService, useValue: { get: jest.fn((_: string, def?: string) => def) } },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn((key: string, def?: string) => {
+              const defaults: Record<string, string> = {
+                UPLOAD_MAX_SIZE: '1048576000',
+                SIGNED_URL_EXPIRATION: '300',
+                IMAGE_WORKER_URL: 'https://worker.dev',
+                IMAGE_SIGNING_SECRET: 'test-secret-key-32-chars-minimum-length',
+              };
+              return defaults[key] ?? def;
+            }),
+            getOrThrow: jest.fn((key: string) => {
+              const defaults: Record<string, string> = {
+                UPLOAD_MAX_SIZE: '1048576000',
+                SIGNED_URL_EXPIRATION: '300',
+                IMAGE_WORKER_URL: 'https://worker.dev',
+                IMAGE_SIGNING_SECRET: 'test-secret-key-32-chars-minimum-length',
+              };
+              return defaults[key];
+            }),
+          },
+        },
         { provide: PrismaService, useValue: prisma },
         { provide: StorageService, useValue: storage },
-        { provide: MediaQueueService, useValue: mediaQueue },
+        { provide: ImageUrlSigner, useValue: urlSigner },
       ],
     }).compile();
 
@@ -54,7 +86,7 @@ describe('UploadsService', () => {
   });
 
   describe('init', () => {
-    it('creates an UPLOADING file record and returns a signed URL', async () => {
+    it('creates an UPLOADING file record and returns a signed PUT URL', async () => {
       const created = {
         id: 'file-1',
         userId: 'user-1',
@@ -170,10 +202,10 @@ describe('UploadsService', () => {
       });
 
       await expect(service.complete('user-A', 'file-1')).rejects.toThrow(NotFoundException);
-      expect(mediaQueue.addMediaJob).not.toHaveBeenCalled();
+      expect(prisma.file.update).not.toHaveBeenCalled();
     });
 
-    it('enqueues a processing job and marks PROCESSING', async () => {
+    it('verifies object exists in storage and marks READY (no queue)', async () => {
       prisma.file.findUnique.mockResolvedValue({
         id: 'file-1',
         userId: 'user-1',
@@ -185,18 +217,12 @@ describe('UploadsService', () => {
 
       const result = await service.complete('user-1', 'file-1');
 
-      expect(mediaQueue.addMediaJob).toHaveBeenCalledWith({
-        fileId: 'file-1',
-        userId: 'user-1',
-        originalKey: 'users/user-1/photos/file-1/original',
-        mimeType: 'image/jpeg',
-      });
+      expect(storage.headObject).toHaveBeenCalledWith('users/user-1/photos/file-1/original');
       expect(prisma.file.update).toHaveBeenCalledWith({
         where: { id: 'file-1' },
-        data: { status: 'PROCESSING' },
+        data: { status: 'READY', width: null, height: null },
       });
-      expect(result).toEqual({ id: 'file-1', status: 'PROCESSING' });
-      expect(prisma.photo.findUnique).not.toHaveBeenCalled();
+      expect(result).toEqual({ id: 'file-1', status: 'READY' });
     });
 
     it('creates an event Photo idempotently when the file has an eventId', async () => {
@@ -220,7 +246,7 @@ describe('UploadsService', () => {
           uploadedBy: 'user-1',
         },
       });
-      expect(result).toEqual({ id: 'file-1', status: 'PROCESSING' });
+      expect(result).toEqual({ id: 'file-1', status: 'READY' });
     });
 
     it('does not duplicate an event Photo on retry', async () => {
@@ -240,19 +266,20 @@ describe('UploadsService', () => {
       expect(prisma.photo.create).not.toHaveBeenCalled();
     });
 
-    it('does not enqueue a duplicate job when already PROCESSING', async () => {
+    it('returns early if already READY', async () => {
       prisma.file.findUnique.mockResolvedValue({
         id: 'file-1',
         userId: 'user-1',
-        status: 'PROCESSING',
+        status: 'READY',
         originalKey: 'users/user-1/photos/file-1/original',
         mimetype: 'image/jpeg',
       });
 
       const result = await service.complete('user-1', 'file-1');
 
-      expect(mediaQueue.addMediaJob).not.toHaveBeenCalled();
-      expect(result.status).toBe('PROCESSING');
+      expect(storage.headObject).not.toHaveBeenCalled();
+      expect(prisma.file.update).not.toHaveBeenCalled();
+      expect(result).toEqual({ id: 'file-1', status: 'READY' });
     });
 
     it('rejects when the object does not exist in storage', async () => {
@@ -266,7 +293,7 @@ describe('UploadsService', () => {
       storage.headObject.mockResolvedValue({ exists: false, size: null, contentType: null });
 
       await expect(service.complete('user-1', 'file-1')).rejects.toThrow(BadRequestException);
-      expect(mediaQueue.addMediaJob).not.toHaveBeenCalled();
+      expect(prisma.file.update).not.toHaveBeenCalled();
     });
   });
 
@@ -289,7 +316,7 @@ describe('UploadsService', () => {
       await expect(service.findOne('user-A', 'file-1')).rejects.toThrow(NotFoundException);
     });
 
-    it('findOne only returns signed URLs for READY media', async () => {
+    it('findOne returns Worker signed URLs for READY media', async () => {
       prisma.file.findUnique.mockResolvedValue({
         id: 'file-1',
         userId: 'user-1',
@@ -306,9 +333,40 @@ describe('UploadsService', () => {
 
       const result = await service.findOne('user-1', 'file-1');
 
-      expect(result.previewUrl).toBe('https://signed.get/url');
-      expect(result.mediumUrl).toBe('https://signed.get/url');
-      expect(result.originalUrl).toBe('https://signed.get/url');
+      expect(urlSigner.signAll).toHaveBeenCalledWith(
+        'users/user-1/photos/file-1/original',
+        expect.objectContaining({
+          mediumKey: 'users/user-1/photos/file-1/medium',
+          previewKey: 'users/user-1/photos/file-1/preview',
+        }),
+      );
+      expect(result.previewUrl).toContain('worker.dev/image');
+      expect(result.mediumUrl).toContain('worker.dev/image');
+      expect(result.originalUrl).toContain('worker.dev/image');
+      expect(result.thumbnailUrl).toContain('worker.dev/image');
+    });
+
+    it('findOne returns null URLs for non-READY media', async () => {
+      prisma.file.findUnique.mockResolvedValue({
+        id: 'file-1',
+        userId: 'user-1',
+        status: 'UPLOADING',
+        originalKey: 'users/user-1/photos/file-1/original',
+        previewKey: 'users/user-1/photos/file-1/preview',
+        mediumKey: 'users/user-1/photos/file-1/medium',
+        mimetype: 'image/jpeg',
+        size: 10,
+        width: 400,
+        height: 300,
+        duration: null,
+      });
+
+      const result = await service.findOne('user-1', 'file-1');
+
+      expect(result.previewUrl).toBeNull();
+      expect(result.mediumUrl).toBeNull();
+      expect(result.originalUrl).toBeNull();
+      expect(result.thumbnailUrl).toBeNull();
     });
   });
 });

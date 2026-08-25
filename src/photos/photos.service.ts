@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import sharp from 'sharp';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
+import { ImageUrlSigner } from '../common/utils/image-url-signer';
 import { randomUUID } from 'crypto';
 
 const THUMB_WIDTH = 200;
@@ -14,6 +15,7 @@ export class PhotosService {
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly config: ConfigService,
+    private readonly urlSigner: ImageUrlSigner,
   ) {}
 
   async upload(eventId: string, file: Express.Multer.File, userId: string) {
@@ -29,37 +31,25 @@ export class PhotosService {
     }
 
     const id = randomUUID();
-    const prefix = `uploads/${id}`;
+    const originalKey = this.storage.buildKey(userId, id, 'original');
 
     const metadata = await sharp(file.buffer).metadata();
 
-    const thumbnail = await sharp(file.buffer)
-      .resize(THUMB_WIDTH, undefined, { fit: 'cover' })
-      .jpeg({ quality: 80 })
-      .toBuffer();
-
-    const preview = await sharp(file.buffer)
-      .resize(PREVIEW_WIDTH, undefined, { fit: 'inside' })
-      .jpeg({ quality: 85 })
-      .toBuffer();
-
-    const [originalUrl, previewUrl, thumbnailUrl] = await Promise.all([
-      this.storage.upload(`${prefix}/original.jpg`, file.buffer, file.mimetype),
-      this.storage.upload(`${prefix}/preview.jpg`, preview, 'image/jpeg'),
-      this.storage.upload(`${prefix}/thumbnail.jpg`, thumbnail, 'image/jpeg'),
-    ]);
+    await this.storage.upload(originalKey, file.buffer, file.mimetype);
 
     const fileRecord = await this.prisma.file.create({
       data: {
         id,
+        userId,
         originalName: file.originalname,
         mimetype: file.mimetype,
         size: file.size,
         width: metadata.width ?? null,
         height: metadata.height ?? null,
-        originalUrl,
-        previewUrl,
-        thumbnailUrl,
+        originalKey,
+        originalUrl: originalKey,
+        previewUrl: '',
+        thumbnailUrl: '',
         status: 'READY',
       },
     });
@@ -100,7 +90,7 @@ export class PhotosService {
       orderBy: { createdAt: 'desc' },
     });
 
-    const expiration = Number(this.config.get('SIGNED_URL_EXPIRATION', '3600'));
+    const expiration = Number(this.config.get('SIGNED_URL_EXPIRATION', '300'));
     return Promise.all(
       photos.map(async (photo) => {
         const file = photo.file;
@@ -109,24 +99,29 @@ export class PhotosService {
         }
 
         const ready = file.status === 'READY';
-        const sign = (key: string | null) =>
-          ready && key ? this.storage.createPresignedGetUrl(key, expiration) : Promise.resolve('');
-
-        const [originalUrl, previewUrl, mediumUrl] = await Promise.all([
-          sign(file.originalKey),
-          sign(file.previewKey),
-          sign(file.mediumKey),
-        ]);
+        const urls =
+          ready && file.originalKey
+            ? this.urlSigner.signAll(file.originalKey, {
+                mediumKey: file.mediumKey ?? null,
+                previewKey: file.previewKey ?? null,
+                expiresInSeconds: expiration,
+              })
+            : {
+                originalUrl: null,
+                mediumUrl: null,
+                previewUrl: null,
+                thumbnailUrl: null,
+              };
 
         return {
           ...photo,
           file: {
             ...file,
             status: file.status,
-            originalUrl,
-            previewUrl,
-            thumbnailUrl: previewUrl,
-            mediumUrl,
+            originalUrl: urls.originalUrl,
+            previewUrl: urls.previewUrl,
+            thumbnailUrl: urls.thumbnailUrl,
+            mediumUrl: urls.mediumUrl,
           },
         };
       }),

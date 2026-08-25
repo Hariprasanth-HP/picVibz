@@ -10,7 +10,6 @@ import { PhotosModule } from './photos/photos.module';
 import { StorageModule } from './storage/storage.module';
 import { AuthModule } from './auth/auth.module';
 import { EventsModule } from './events/events.module';
-import { MediaQueueModule } from './queues/media.queue';
 import { UploadsModule } from './uploads/uploads.module';
 
 @Module({
@@ -33,7 +32,6 @@ import { UploadsModule } from './uploads/uploads.module';
     StorageModule,
     FilesModule,
     PhotosModule,
-    MediaQueueModule,
     UploadsModule,
   ],
   providers: [

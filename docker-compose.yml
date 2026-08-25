@@ -5,16 +5,5 @@ services:
     command: node dist/main.js
     env_file:
       - .env
-    environment:
-      MEDIA_WORKER_CONCURRENCY: ${MEDIA_WORKER_CONCURRENCY:-3}
     ports:
       - "127.0.0.1:8080:8080"
-
-  worker:
-    build: .
-    restart: unless-stopped
-    command: node dist/worker.js
-    env_file:
-      - .env
-    environment:
-      MEDIA_WORKER_CONCURRENCY: ${MEDIA_WORKER_CONCURRENCY:-3}
