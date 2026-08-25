@@ -51,6 +51,10 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
+             # Remove old host dependencies/build artifacts
+            rm -rf node_modules
+            rm -rf dist
+
             # Rebuild and restart API (no cache to pick up deleted files)
             sudo docker compose build --no-cache
             sudo docker compose up -d
