@@ -51,8 +51,9 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            # Rebuild and restart API
-            sudo docker compose up -d --build
+            # Rebuild and restart API (no cache to pick up deleted files)
+            sudo docker compose build --no-cache
+            sudo docker compose up -d
 
   # ============================================================
   # DEPLOY CLOUDFLARE WORKER
