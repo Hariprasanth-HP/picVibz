@@ -47,16 +47,30 @@ jobs:
             git config --local core.sshCommand \
               "ssh -i ~/.ssh/github_deploy -o IdentitiesOnly=yes"
 
-            # Get latest code FIRST (before cleanup)
+            # Get latest code FIRST
             echo "Fetching latest code..."
-            git fetch origin main || { echo "Git fetch failed - check deploy key"; exit 1; }
+            git fetch origin main || { echo "ERROR: Git fetch failed - check deploy key permissions"; exit 1; }
             git reset --hard origin/main
 
-            # Verify clean state
-            echo "Git status:"
-            git status
-            echo "Source directories:"
-            ls -la src/processors/ src/queues/ src/workers/ 2>/dev/null || echo "Directories don't exist (expected)"
+            # Verify clean state - fail if any issues
+            echo "Verifying git state..."
+            git status --porcelain | grep -q . && { echo "ERROR: Working tree not clean"; exit 1; }
+            
+            # Verify deleted files are actually gone
+            test ! -f src/worker.ts || { echo "ERROR: src/worker.ts still exists!"; exit 1; }
+            test ! -d src/workers || { echo "ERROR: src/workers/ still exists!"; exit 1; }
+            test ! -d src/queues || { echo "ERROR: src/queues/ still exists!"; exit 1; }
+            test ! -d src/processors || { echo "ERROR: src/processors/ still exists!"; exit 1; }
+
+            # Verify commit matches origin/main
+            CURRENT_COMMIT=$(git rev-parse HEAD)
+            EXPECTED_COMMIT=$(git ls-remote origin main | cut -f1)
+            [ "$CURRENT_COMMIT" = "$EXPECTED_COMMIT" ] || { echo "ERROR: Commit mismatch! Current=$CURRENT_COMMIT Expected=$EXPECTED_COMMIT"; exit 1; }
+
+            # Debug output
+            echo "Git status: OK"
+            echo "Current commit: $(git rev-parse HEAD)"
+            echo "Source directories verified deleted"
 
             # Cleanup build artifacts
             rm -rf node_modules
@@ -66,7 +80,7 @@ jobs:
             echo "Clearing Docker builder cache..."
             sudo docker builder prune -a -f
 
-            # Rebuild and restart API (no cache to pick up deleted files)
+            # Rebuild and restart API
             sudo docker compose build --no-cache
             sudo docker compose up -d
 
