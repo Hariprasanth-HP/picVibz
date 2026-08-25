@@ -51,6 +51,7 @@ jobs:
             echo "Fetching latest code..."
             git fetch origin main || { echo "ERROR: Git fetch failed - check deploy key permissions"; exit 1; }
             git reset --hard origin/main
+            git clean -fd  # Remove untracked files and directories
 
             # Verify clean state - fail if any issues
             echo "Verifying git state..."
