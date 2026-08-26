@@ -227,7 +227,7 @@ jobs:
 
           [[env.production.r2_buckets]]
           binding = "IMAGES"
-          bucket_name = "picvibz-images"
+          bucket_name = "picvibz"
           EOF
 
           echo "Wrangler configuration created"
