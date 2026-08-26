@@ -213,6 +213,26 @@ jobs:
         run: wrangler --version
 
       # --------------------------------------------------------
+      # Create Wrangler config with R2 binding
+      # --------------------------------------------------------
+      - name: Create Wrangler config
+        run: |
+          cat > wrangler.toml <<'EOF'
+          name = "picvibz-image-delivery"
+          main = "worker.js"
+          compatibility_date = "2026-08-26"
+
+          [env.production]
+          name = "picvibz-image-delivery"
+
+          [[env.production.r2_buckets]]
+          binding = "IMAGES"
+          bucket_name = "picvibz-images"
+          EOF
+
+          echo "Wrangler configuration created"
+
+      # --------------------------------------------------------
       # Upload secret to Cloudflare Worker
       # --------------------------------------------------------
       - name: Set Worker secret
