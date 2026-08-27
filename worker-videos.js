@@ -220,20 +220,31 @@ async function processVideoSync(job, env) {
   };
 }
 
+async function notifyComplete(job, result, env) {
+  const callbackUrl = `${env.NESTJS_INTERNAL_URL}/api/v1/uploads/internal/${job.fileId}/complete`;
+  const response = await fetch(callbackUrl, {
+    method: 'PATCH',
+    headers: {
+      'Authorization': `Bearer ${env.INTERNAL_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(result),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Complete callback failed: ${response.status} ${error}`);
+  }
+
+  return response;
+}
+
 async function handleProcess(request, env) {
   try {
     const job = await request.json();
     const result = await processVideoSync(job, env);
 
-    const callbackUrl = `${env.NESTJS_INTERNAL_URL}/api/v1/uploads/internal/${job.fileId}/complete`;
-    await fetch(callbackUrl, {
-      method: 'PATCH',
-      headers: {
-        'Authorization': `Bearer ${env.INTERNAL_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(result),
-    });
+    await notifyComplete(job, result, env);
 
     return Response.json({ success: true, ...result });
   } catch (error) {
@@ -245,7 +256,8 @@ async function handleProcess(request, env) {
 async function handleQueue(batch, env) {
   for (const message of batch.messages) {
     try {
-      await processVideoSync(message.body, env);
+      const result = await processVideoSync(message.body, env);
+      await notifyComplete(message.body, result, env);
       message.ack();
     } catch (error) {
       console.error("Queue processing failed:", error);
