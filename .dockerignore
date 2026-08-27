@@ -9,5 +9,4 @@ dist
 coverage
 docs
 src/processors
-src/queues
 src/workers
