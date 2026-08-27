@@ -34,11 +34,6 @@ export class PhotosService {
 
     await this.storage.upload(originalKey, file.buffer, file.mimetype);
 
-    const variants = await this.generateVariants(userId, id, file.buffer);
-    const thumbnailKey = variants.thumbnail?.key ?? null;
-    const mediumKey = variants.medium?.key ?? null;
-    const previewKey = variants.preview?.key ?? null;
-
     const created = await this.prisma.media.create({
       data: {
         id,
@@ -51,9 +46,6 @@ export class PhotosService {
         width: metadata.width ?? null,
         height: metadata.height ?? null,
         originalKey,
-        thumbnailKey,
-        mediumKey,
-        previewKey,
         status: 'READY',
       },
       include: {
@@ -67,41 +59,6 @@ export class PhotosService {
       ...created,
       size: Number(created.size),
       duration: created.duration !== null ? Number(created.duration) : null,
-    };
-  }
-
-  private async generateVariants(
-    userId: string,
-    fileId: string,
-    buffer: Buffer,
-  ): Promise<Record<'thumbnail' | 'medium' | 'preview', { key: string } | null>> {
-    const specs = [
-      { variant: 'thumbnail' as const, width: 300, quality: 75 },
-      { variant: 'medium' as const, width: 800, quality: 80 },
-      { variant: 'preview' as const, width: 1600, quality: 80 },
-    ];
-
-    const results = await Promise.all(
-      specs.map(async ({ variant, width, quality }) => {
-        try {
-          const webp = await sharp(buffer)
-            .resize({ width, fit: 'inside', withoutEnlargement: true })
-            .webp({ quality })
-            .toBuffer();
-
-          const key = this.storage.buildKey(userId, fileId, variant);
-          await this.storage.upload(key, webp, 'image/webp');
-          return { variant, key };
-        } catch {
-          return { variant, key: null };
-        }
-      }),
-    );
-
-    return {
-      thumbnail: results[0]?.key ? { key: results[0].key } : null,
-      medium: results[1]?.key ? { key: results[1].key } : null,
-      preview: results[2]?.key ? { key: results[2].key } : null,
     };
   }
 
@@ -141,7 +98,6 @@ export class PhotosService {
           ? this.urlSigner.signAll(item.originalKey, {
               mediumKey: item.mediumKey ?? null,
               previewKey: item.previewKey ?? null,
-              thumbnailKey: item.thumbnailKey ?? null,
               expiresInSeconds: expiration,
             })
           : {

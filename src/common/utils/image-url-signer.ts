@@ -1,6 +1,6 @@
 import { createHmac } from 'crypto';
 
-export type ImageSize = 'original' | 'medium' | 'preview' | 'thumbnail';
+export type ImageSize = 'original' | 'medium' | 'preview';
 
 export interface ImageUrlSignerConfig {
   baseUrl: string;
@@ -34,12 +34,7 @@ export class ImageUrlSigner {
 
   signAll(
     originalKey: string,
-    options?: {
-      mediumKey?: string | null;
-      previewKey?: string | null;
-      thumbnailKey?: string | null;
-      expiresInSeconds?: number;
-    },
+    options?: { mediumKey?: string | null; previewKey?: string | null; expiresInSeconds?: number },
   ): {
     originalUrl: string;
     mediumUrl: string | null;
@@ -51,9 +46,7 @@ export class ImageUrlSigner {
       originalUrl: this.sign(originalKey, 'original', expiry),
       mediumUrl: options?.mediumKey ? this.sign(options.mediumKey, 'medium', expiry) : null,
       previewUrl: options?.previewKey ? this.sign(options.previewKey, 'preview', expiry) : null,
-      thumbnailUrl: options?.thumbnailKey
-        ? this.sign(options.thumbnailKey, 'thumbnail', expiry)
-        : null,
+      thumbnailUrl: options?.mediumKey ? this.sign(options.mediumKey, 'medium', expiry) : null,
     };
   }
 }

@@ -220,7 +220,6 @@ export class UploadsService {
         ? this.urlSigner.signAll(media.originalKey, {
             mediumKey: media.mediumKey ?? null,
             previewKey: media.previewKey ?? null,
-            thumbnailKey: media.thumbnailKey ?? null,
             expiresInSeconds: this.signedUrlExpiration,
           })
         : {
