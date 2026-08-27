@@ -24,8 +24,8 @@ jobs:
         run: |
           printf '%s\n' "$ENV_FILE_CONTENT" > .env
 
-          EC2_HOST=$(grep '^EC2_HOST=' .env | cut -d '=' -f2-)
-          EC2_USER=$(grep '^EC2_USER=' .env | cut -d '=' -f2-)
+          EC2_HOST=$(grep '^EC2_HOST=' .env | cut -d '=' -f2- || true)
+          EC2_USER=$(grep '^EC2_USER=' .env | cut -d '=' -f2- || true)
 
           if [ -z "$EC2_HOST" ]; then
             echo "ERROR: EC2_HOST is missing from ENV_FILE"
@@ -56,11 +56,16 @@ jobs:
 
             cd ~/picVibz
 
+            # Clear stale git locks left by interrupted deploys
+            rm -f .git/config.lock .git/index.lock .git/HEAD.lock
+
             # ------------------------------------------------
-            # Configure EC2 -> GitHub authentication
+            # Configure EC2 -> GitHub authentication (idempotent)
             # ------------------------------------------------
-            git config --local core.sshCommand \
-              "ssh -i ~/.ssh/github_deploy -o IdentitiesOnly=yes"
+            SSH_COMMAND="ssh -i ~/.ssh/github_deploy -o IdentitiesOnly=yes"
+            if [ "$(git config --local core.sshCommand 2>/dev/null || true)" != "$SSH_COMMAND" ]; then
+              git config --local core.sshCommand "$SSH_COMMAND"
+            fi
 
             # ------------------------------------------------
             # Get latest code
@@ -172,12 +177,12 @@ jobs:
         run: |
           printf '%s\n' "$ENV_FILE_CONTENT" > .env
 
-          CLOUDFLARE_API_TOKEN=$(grep '^CLOUDFLARE_API_TOKEN=' .env | cut -d '=' -f2-)
-          CLOUDFLARE_ACCOUNT_ID=$(grep '^CLOUDFLARE_ACCOUNT_ID=' .env | cut -d '=' -f2-)
-          IMAGE_SIGNING_SECRET=$(grep '^IMAGE_SIGNING_SECRET=' .env | cut -d '=' -f2-)
-          INTERNAL_API_KEY=$(grep '^INTERNAL_API_KEY=' .env | cut -d '=' -f2-)
-          NESTJS_INTERNAL_URL=$(grep '^NESTJS_INTERNAL_URL=' .env | cut -d '=' -f2-)
-          VIDEO_QUEUE_TOKEN=$(grep '^VIDEO_QUEUE_TOKEN=' .env | cut -d '=' -f2-)
+          CLOUDFLARE_API_TOKEN=$(grep '^CLOUDFLARE_API_TOKEN=' .env | cut -d '=' -f2- || true)
+          CLOUDFLARE_ACCOUNT_ID=$(grep '^CLOUDFLARE_ACCOUNT_ID=' .env | cut -d '=' -f2- || true)
+          IMAGE_SIGNING_SECRET=$(grep '^IMAGE_SIGNING_SECRET=' .env | cut -d '=' -f2- || true)
+          INTERNAL_API_KEY=$(grep '^INTERNAL_API_KEY=' .env | cut -d '=' -f2- || true)
+          NESTJS_INTERNAL_URL=$(grep '^NESTJS_INTERNAL_URL=' .env | cut -d '=' -f2- || true)
+          VIDEO_QUEUE_TOKEN=$(grep '^VIDEO_QUEUE_TOKEN=' .env | cut -d '=' -f2- || true)
 
           if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
             echo "ERROR: CLOUDFLARE_API_TOKEN missing"
@@ -196,6 +201,16 @@ jobs:
 
           if [ -z "$INTERNAL_API_KEY" ]; then
             echo "ERROR: INTERNAL_API_KEY missing"
+            exit 1
+          fi
+
+          if [ -z "$NESTJS_INTERNAL_URL" ]; then
+            echo "ERROR: NESTJS_INTERNAL_URL missing"
+            exit 1
+          fi
+
+          if [ -z "$VIDEO_QUEUE_TOKEN" ]; then
+            echo "ERROR: VIDEO_QUEUE_TOKEN missing"
             exit 1
           fi
 
