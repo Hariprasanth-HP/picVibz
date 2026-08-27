@@ -11,8 +11,5 @@ binding = "IMAGES"
 bucket_name = "picvibz"
 preview_bucket_name = "picvibz"
 
-[[images]]
-binding = "IMAGE_TRANSFORM"
-
 [env.production]
 name = "picvibz-images"

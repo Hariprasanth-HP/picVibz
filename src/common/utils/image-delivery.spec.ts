@@ -1,6 +1,6 @@
 import { createHmac } from 'crypto';
 
-const ALLOWED_SIZES = new Set(['original', 'preview', 'medium']);
+const ALLOWED_SIZES = new Set(['original', 'preview', 'medium', 'thumbnail']);
 
 function toBase64Url(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
@@ -126,8 +126,8 @@ describe('Cloudflare Worker Image Delivery', () => {
       expect(ALLOWED_SIZES.has('preview')).toBe(true);
     });
 
-    it('rejects thumbnail (not in allowlist)', () => {
-      expect(ALLOWED_SIZES.has('thumbnail')).toBe(false);
+    it('allows thumbnail (pre-generated variant)', () => {
+      expect(ALLOWED_SIZES.has('thumbnail')).toBe(true);
     });
 
     it('rejects large', () => {
@@ -144,35 +144,37 @@ describe('Cloudflare Worker Image Delivery', () => {
       'users/user-1/photos/file-1/original',
       'users/abc/photos/xyz/original',
       'users/user-123/photos/file-456/original',
+      'users/user-1/photos/file-1/medium',
+      'users/user-1/photos/file-1/preview',
+      'users/user-1/photos/file-1/thumbnail',
     ];
 
     const invalidKeys = [
       '../../../etc/passwd',
       'users/user-1/photos/file-1/../original',
-      'users/user-1/photos/file-1/medium', // not ending in /original
-      'users/user-1/photos/file-1/', // trailing slash
-      'users/user-1/photos/', // incomplete
-      '', // empty
-      'original', // missing path
-      'users/user-1/photos/file-1/original/extra', // extra path
+      'users/user-1/photos/file-1/',
+      'users/user-1/photos/',
+      '',
+      'original',
+      'users/user-1/photos/file-1/original/extra',
     ];
 
     it('accepts valid key formats', () => {
-      const pattern = /^users\/[^/]+\/photos\/[^/]+\/original$/;
+      const pattern = /^users\/[^/]+\/photos\/[^/]+\/(original|thumbnail|preview|medium)$/;
       validKeys.forEach((key) => {
         expect(pattern.test(key)).toBe(true);
       });
     });
 
     it('rejects invalid key formats', () => {
-      const pattern = /^users\/[^/]+\/photos\/[^/]+\/original$/;
+      const pattern = /^users\/[^/]+\/photos\/[^/]+\/(original|thumbnail|preview|medium)$/;
       invalidKeys.forEach((key) => {
         expect(pattern.test(key)).toBe(false);
       });
     });
   });
 
-  describe('Fetch URL construction', () => {
+  describe('R2 variant key construction', () => {
     const r2BaseUrl = 'https://picvibz.r2.dev';
 
     it('constructs direct URL for original', () => {
@@ -181,26 +183,16 @@ describe('Cloudflare Worker Image Delivery', () => {
       expect(fetchUrl).toBe('https://picvibz.r2.dev/users/user-1/photos/file-1/original');
     });
 
-    it('constructs Image Resizing URL for medium', () => {
-      const key = 'users/user-1/photos/file-1/original';
-      const baseKey = key.replace(/\/original$/, '');
-      const params = 'width=1600,format=webp,quality=80,fit=scale-down';
-      const fetchUrl = `${r2BaseUrl}/cdn-cgi/image/${params}/${baseKey}/original`;
-      expect(fetchUrl).toContain('/cdn-cgi/image/');
-      expect(fetchUrl).toContain('width=1600');
-      expect(fetchUrl).toContain('format=webp');
-      expect(fetchUrl).toContain('quality=80');
+    it('constructs direct URL for medium variant key', () => {
+      const key = 'users/user-1/photos/file-1/medium';
+      const fetchUrl = `${r2BaseUrl}/${key}`;
+      expect(fetchUrl).toBe('https://picvibz.r2.dev/users/user-1/photos/file-1/medium');
     });
 
-    it('constructs Image Resizing URL for preview', () => {
-      const key = 'users/user-1/photos/file-1/original';
-      const baseKey = key.replace(/\/original$/, '');
-      const params = 'width=300,format=webp,quality=75,fit=scale-down';
-      const fetchUrl = `${r2BaseUrl}/cdn-cgi/image/${params}/${baseKey}/original`;
-      expect(fetchUrl).toContain('/cdn-cgi/image/');
-      expect(fetchUrl).toContain('width=300');
-      expect(fetchUrl).toContain('format=webp');
-      expect(fetchUrl).toContain('quality=75');
+    it('constructs direct URL for preview variant key', () => {
+      const key = 'users/user-1/photos/file-1/preview';
+      const fetchUrl = `${r2BaseUrl}/${key}`;
+      expect(fetchUrl).toBe('https://picvibz.r2.dev/users/user-1/photos/file-1/preview');
     });
   });
 });

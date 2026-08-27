@@ -62,13 +62,14 @@ describe('ImageUrlSigner', () => {
       const urls = signer.signAll(originalKey, {
         mediumKey: 'users/user-1/photos/file-1/medium',
         previewKey: 'users/user-1/photos/file-1/preview',
+        thumbnailKey: 'users/user-1/photos/file-1/thumbnail',
         expiresInSeconds: 300,
       });
 
       expect(urls.originalUrl).toContain('size=original');
       expect(urls.mediumUrl).toContain('size=medium');
       expect(urls.previewUrl).toContain('size=preview');
-      expect(urls.thumbnailUrl).toContain('size=medium');
+      expect(urls.thumbnailUrl).toContain('size=thumbnail');
     });
 
     it('returns null for missing variant keys', () => {

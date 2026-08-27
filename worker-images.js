@@ -6,7 +6,7 @@ const ALLOWED_SIZES = new Set([
 ]);
 
 const KEY_PATTERN =
-  /^users\/[^/]+\/photos\/[^/]+\/original$/;
+  /^users\/[^/]+\/photos\/[^/]+\/(original|thumbnail|preview|medium)$/;
 
 function fromBase64Url(value) {
   value = value.replace(/-/g, "+").replace(/_/g, "/");
@@ -43,31 +43,6 @@ async function verify(secret, message, signature) {
     );
   } catch {
     return false;
-  }
-}
-
-function getTransform(size) {
-  switch (size) {
-    case "thumbnail":
-      return {
-        width: 300,
-        quality: 75,
-      };
-
-    case "preview":
-      return {
-        width: 1600,
-        quality: 80,
-      };
-
-    case "medium":
-      return {
-        width: 1600,
-        quality: 80,
-      };
-
-    default:
-      return null;
   }
 }
 
@@ -145,6 +120,13 @@ export default {
       });
     }
 
+    // The key must end with the requested variant
+    if (!key.endsWith(`/${size}`)) {
+      return new Response("Key/size mismatch", {
+        status: 400,
+      });
+    }
+
     // Signature must cover exactly these values
     const message =
       `${key}\n${size}\n${expires}`;
@@ -161,7 +143,7 @@ export default {
       });
     }
 
-    // Read the original from PRIVATE R2
+    // Serve the pre-generated variant directly from PRIVATE R2
     const object = await env.IMAGES.get(key);
 
     if (!object) {
@@ -170,131 +152,44 @@ export default {
       });
     }
 
-    /*
-     * ORIGINAL
-     *
-     * Return original R2 object directly.
-     */
-    if (size === "original") {
-      const headers = new Headers();
+    const headers = new Headers();
 
+    headers.set(
+      "Content-Type",
+      object.httpMetadata?.contentType ||
+        "application/octet-stream"
+    );
+
+    headers.set(
+      "Cache-Control",
+      "private, max-age=300"
+    );
+
+    headers.set(
+      "Access-Control-Allow-Origin",
+      "*"
+    );
+
+    headers.set(
+      "Access-Control-Allow-Methods",
+      "GET, HEAD"
+    );
+
+    headers.set(
+      "Access-Control-Allow-Headers",
+      "Content-Type"
+    );
+
+    if (object.httpEtag) {
       headers.set(
-        "Content-Type",
-        object.httpMetadata?.contentType ||
-          "application/octet-stream"
+        "ETag",
+        object.httpEtag
       );
-
-      headers.set(
-        "Cache-Control",
-        "private, max-age=300"
-      );
-
-      headers.set(
-        "Access-Control-Allow-Origin",
-        "*"
-      );
-
-      headers.set(
-        "Access-Control-Allow-Methods",
-        "GET, HEAD"
-      );
-
-      headers.set(
-        "Access-Control-Allow-Headers",
-        "Content-Type"
-      );
-
-      if (object.httpEtag) {
-        headers.set(
-          "ETag",
-          object.httpEtag
-        );
-      }
-
-      return new Response(object.body, {
-        status: 200,
-        headers,
-      });
     }
 
-    /*
-     * THUMBNAIL / PREVIEW / MEDIUM
-     *
-     * Transform the private R2 object using
-     * the Cloudflare Images binding.
-     */
-    const transform = getTransform(size);
-
-    if (!transform) {
-      return new Response("Invalid image size", {
-        status: 400,
-      });
-    }
-
-    try {
-      const transformed =
-        await env.IMAGE_TRANSFORM
-          .input(object.body)
-          .transform({
-            width: transform.width,
-            fit: "scale-down",
-          })
-          .output({
-            format: "webp",
-            quality: transform.quality,
-          });
-
-      const response =
-        transformed.response();
-
-      const headers = new Headers(
-        response.headers
-      );
-
-      headers.set(
-        "Content-Type",
-        "image/webp"
-      );
-
-      headers.set(
-        "Cache-Control",
-        "private, max-age=300"
-      );
-
-      headers.set(
-        "Access-Control-Allow-Origin",
-        "*"
-      );
-
-      headers.set(
-        "Access-Control-Allow-Methods",
-        "GET, HEAD"
-      );
-
-      headers.set(
-        "Access-Control-Allow-Headers",
-        "Content-Type"
-      );
-
-      return new Response(
-        response.body,
-        {
-          status: response.status,
-          headers,
-        }
-      );
-    } catch (error) {
-      console.error(
-        "Image transformation failed:",
-        error
-      );
-
-      return new Response(
-        "Failed to transform image",
-        {
-          status: 502,
-        }
-      );
-    }
+    return new Response(object.body, {
+      status: 200,
+      headers,
+    });
   },
 };
