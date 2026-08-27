@@ -68,6 +68,17 @@ jobs:
             fi
 
             # ------------------------------------------------
+            # Free disk space before fetching / building
+            # ------------------------------------------------
+            echo "Freeing disk space..."
+            sudo docker compose down >/dev/null 2>&1 || true
+            sudo docker system prune -af --volumes >/dev/null 2>&1 || true
+            sudo docker builder prune -af >/dev/null 2>&1 || true
+            rm -rf node_modules dist
+            sudo journalctl --vacuum-size=50M >/dev/null 2>&1 || true
+            sudo apt-get clean >/dev/null 2>&1 || true
+
+            # ------------------------------------------------
             # Get latest code
             # ------------------------------------------------
             echo "Fetching latest code..."
@@ -124,27 +135,11 @@ jobs:
             echo "Required environment configuration found"
 
             # ------------------------------------------------
-            # Cleanup old build artifacts
-            # ------------------------------------------------
-            rm -rf node_modules
-            rm -rf dist
-
-            # ------------------------------------------------
-            # Stop current containers
-            # ------------------------------------------------
-            sudo docker compose down
-
-            # ------------------------------------------------
-            # Clear Docker builder cache
-            # ------------------------------------------------
-            echo "Clearing Docker builder cache..."
-
-            sudo docker builder prune -a -f
-
-            # ------------------------------------------------
             # Rebuild completely
             # ------------------------------------------------
             echo "Building Docker image..."
+
+            sudo docker compose down
 
             sudo docker compose build --no-cache
 
