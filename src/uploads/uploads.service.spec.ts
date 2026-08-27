@@ -5,11 +5,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { UploadsService } from './uploads.service';
 import { ImageUrlSigner } from '../common/utils/image-url-signer';
+import { VideoUrlSigner } from '../common/utils/video-url-signer';
+import { VideoQueueService } from '../queues/video.queue';
 
 describe('UploadsService', () => {
   let service: UploadsService;
   const prisma = {
-    file: {
+    media: {
       create: jest.fn(),
       findUnique: jest.fn(),
       findMany: jest.fn(),
@@ -17,10 +19,6 @@ describe('UploadsService', () => {
     },
     event: {
       findFirst: jest.fn(),
-    },
-    photo: {
-      findUnique: jest.fn(),
-      create: jest.fn(),
     },
   };
   const storage = {
@@ -30,6 +28,12 @@ describe('UploadsService', () => {
   };
   const urlSigner = {
     signAll: jest.fn(),
+  };
+  const videoSigner = {
+    signAll: jest.fn(),
+  };
+  const videoQueue = {
+    enqueueVideoProcessing: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -49,6 +53,12 @@ describe('UploadsService', () => {
       thumbnailUrl:
         'https://worker.dev/image?key=users%2Fuser-1%2Fphotos%2Ffile-1%2Foriginal&size=medium&exp=1234567890&sig=ghi',
     });
+    videoSigner.signAll.mockReturnValue({
+      videoUrl:
+        'https://worker.dev/video?key=users%2Fuser-1%2Fphotos%2Ffile-1%2Foriginal&size=video&exp=1234567890&sig=abc',
+      posterUrl: null,
+      previewUrl: null,
+    });
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -62,6 +72,8 @@ describe('UploadsService', () => {
                 SIGNED_URL_EXPIRATION: '300',
                 IMAGE_WORKER_URL: 'https://worker.dev',
                 IMAGE_SIGNING_SECRET: 'test-secret-key-32-chars-minimum-length',
+                VIDEO_WORKER_URL: 'https://worker.dev',
+                VIDEO_SIGNING_SECRET: 'test-secret-key-32-chars-minimum-length',
               };
               return defaults[key] ?? def;
             }),
@@ -69,8 +81,6 @@ describe('UploadsService', () => {
               const defaults: Record<string, string> = {
                 UPLOAD_MAX_SIZE: '1048576000',
                 SIGNED_URL_EXPIRATION: '300',
-                IMAGE_WORKER_URL: 'https://worker.dev',
-                IMAGE_SIGNING_SECRET: 'test-secret-key-32-chars-minimum-length',
               };
               return defaults[key];
             }),
@@ -79,6 +89,8 @@ describe('UploadsService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: StorageService, useValue: storage },
         { provide: ImageUrlSigner, useValue: urlSigner },
+        { provide: VideoUrlSigner, useValue: videoSigner },
+        { provide: VideoQueueService, useValue: videoQueue },
       ],
     }).compile();
 
@@ -86,17 +98,18 @@ describe('UploadsService', () => {
   });
 
   describe('init', () => {
-    it('creates an UPLOADING file record and returns a signed PUT URL', async () => {
+    it('creates an UPLOADING media record and returns a signed PUT URL', async () => {
       const created = {
         id: 'file-1',
-        userId: 'user-1',
+        type: 'PHOTO',
+        uploadedBy: 'user-1',
         originalName: 'IMG_1234.jpg',
         mimetype: 'image/jpeg',
-        size: 4829382,
+        size: BigInt(4829382),
         status: 'UPLOADING',
         originalKey: 'users/user-1/photos/file-1/original',
       };
-      prisma.file.create.mockResolvedValue(created);
+      prisma.media.create.mockResolvedValue(created);
 
       const result = await service.init('user-1', {
         fileName: 'IMG_1234.jpg',
@@ -104,9 +117,10 @@ describe('UploadsService', () => {
         size: 4829382,
       });
 
-      expect(prisma.file.create).toHaveBeenCalledWith({
+      expect(prisma.media.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          userId: 'user-1',
+          type: 'PHOTO',
+          uploadedBy: 'user-1',
           status: 'UPLOADING',
           originalKey: expect.stringContaining('users/user-1/photos/') as unknown as string,
         }),
@@ -134,7 +148,7 @@ describe('UploadsService', () => {
           size: 100,
         }),
       ).rejects.toThrow(BadRequestException);
-      expect(prisma.file.create).not.toHaveBeenCalled();
+      expect(prisma.media.create).not.toHaveBeenCalled();
     });
 
     it('rejects a file larger than UPLOAD_MAX_SIZE', async () => {
@@ -145,7 +159,7 @@ describe('UploadsService', () => {
           size: Number.MAX_SAFE_INTEGER,
         }),
       ).rejects.toThrow(PayloadTooLargeException);
-      expect(prisma.file.create).not.toHaveBeenCalled();
+      expect(prisma.media.create).not.toHaveBeenCalled();
     });
 
     it('stores eventId when the event belongs to the user', async () => {
@@ -153,9 +167,10 @@ describe('UploadsService', () => {
         id: 'event-1',
         createdBy: 'user-1',
       });
-      prisma.file.create.mockResolvedValue({
+      prisma.media.create.mockResolvedValue({
         id: 'file-1',
-        userId: 'user-1',
+        type: 'PHOTO',
+        uploadedBy: 'user-1',
         eventId: 'event-1',
         status: 'UPLOADING',
         originalKey: 'users/user-1/photos/file-1/original',
@@ -171,7 +186,7 @@ describe('UploadsService', () => {
       expect(prisma.event.findFirst).toHaveBeenCalledWith({
         where: { id: 'event-1', createdBy: 'user-1' },
       });
-      expect(prisma.file.create).toHaveBeenCalledWith({
+      expect(prisma.media.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ eventId: 'event-1' }),
       });
     });
@@ -187,28 +202,28 @@ describe('UploadsService', () => {
           eventId: 'event-other',
         }),
       ).rejects.toThrow(NotFoundException);
-      expect(prisma.file.create).not.toHaveBeenCalled();
+      expect(prisma.media.create).not.toHaveBeenCalled();
     });
   });
 
   describe('complete', () => {
     it('returns 404 when the upload belongs to another user', async () => {
-      prisma.file.findUnique.mockResolvedValue({
+      prisma.media.findUnique.mockResolvedValue({
         id: 'file-1',
-        userId: 'user-B',
+        uploadedBy: 'user-B',
         status: 'UPLOADING',
         originalKey: 'users/user-B/photos/file-1/original',
         mimetype: 'image/jpeg',
       });
 
       await expect(service.complete('user-A', 'file-1')).rejects.toThrow(NotFoundException);
-      expect(prisma.file.update).not.toHaveBeenCalled();
+      expect(prisma.media.update).not.toHaveBeenCalled();
     });
 
-    it('verifies object exists in storage and marks READY (no queue)', async () => {
-      prisma.file.findUnique.mockResolvedValue({
+    it('verifies object exists in storage and marks READY (image)', async () => {
+      prisma.media.findUnique.mockResolvedValue({
         id: 'file-1',
-        userId: 'user-1',
+        uploadedBy: 'user-1',
         status: 'UPLOADING',
         originalKey: 'users/user-1/photos/file-1/original',
         mimetype: 'image/jpeg',
@@ -218,58 +233,42 @@ describe('UploadsService', () => {
       const result = await service.complete('user-1', 'file-1');
 
       expect(storage.headObject).toHaveBeenCalledWith('users/user-1/photos/file-1/original');
-      expect(prisma.file.update).toHaveBeenCalledWith({
+      expect(prisma.media.update).toHaveBeenCalledWith({
         where: { id: 'file-1' },
-        data: { status: 'READY', width: null, height: null },
+        data: { status: 'READY' },
       });
       expect(result).toEqual({ id: 'file-1', status: 'READY' });
     });
 
-    it('creates an event Photo idempotently when the file has an eventId', async () => {
-      prisma.file.findUnique.mockResolvedValue({
+    it('sets PROCESSING and enqueues the video for processing', async () => {
+      prisma.media.findUnique.mockResolvedValue({
         id: 'file-1',
-        userId: 'user-1',
+        uploadedBy: 'user-1',
         status: 'UPLOADING',
         originalKey: 'users/user-1/photos/file-1/original',
-        mimetype: 'image/jpeg',
-        eventId: 'event-1',
+        mimetype: 'video/mp4',
       });
-      storage.headObject.mockResolvedValue({ exists: true, size: 100, contentType: 'image/jpeg' });
-      prisma.photo.findUnique.mockResolvedValue(null);
+      storage.headObject.mockResolvedValue({ exists: true, size: 100, contentType: 'video/mp4' });
 
       const result = await service.complete('user-1', 'file-1');
 
-      expect(prisma.photo.create).toHaveBeenCalledWith({
-        data: {
-          eventId: 'event-1',
-          fileId: 'file-1',
-          uploadedBy: 'user-1',
-        },
+      expect(prisma.media.update).toHaveBeenCalledWith({
+        where: { id: 'file-1' },
+        data: { status: 'PROCESSING' },
       });
-      expect(result).toEqual({ id: 'file-1', status: 'READY' });
-    });
-
-    it('does not duplicate an event Photo on retry', async () => {
-      prisma.file.findUnique.mockResolvedValue({
-        id: 'file-1',
-        userId: 'user-1',
-        status: 'UPLOADING',
+      expect(videoQueue.enqueueVideoProcessing).toHaveBeenCalledWith({
+        fileId: 'file-1',
         originalKey: 'users/user-1/photos/file-1/original',
-        mimetype: 'image/jpeg',
-        eventId: 'event-1',
+        mimeType: 'video/mp4',
+        userId: 'user-1',
       });
-      storage.headObject.mockResolvedValue({ exists: true, size: 100, contentType: 'image/jpeg' });
-      prisma.photo.findUnique.mockResolvedValue({ id: 'photo-1' });
-
-      await service.complete('user-1', 'file-1');
-
-      expect(prisma.photo.create).not.toHaveBeenCalled();
+      expect(result).toEqual({ id: 'file-1', status: 'PROCESSING' });
     });
 
     it('returns early if already READY', async () => {
-      prisma.file.findUnique.mockResolvedValue({
+      prisma.media.findUnique.mockResolvedValue({
         id: 'file-1',
-        userId: 'user-1',
+        uploadedBy: 'user-1',
         status: 'READY',
         originalKey: 'users/user-1/photos/file-1/original',
         mimetype: 'image/jpeg',
@@ -278,14 +277,14 @@ describe('UploadsService', () => {
       const result = await service.complete('user-1', 'file-1');
 
       expect(storage.headObject).not.toHaveBeenCalled();
-      expect(prisma.file.update).not.toHaveBeenCalled();
+      expect(prisma.media.update).not.toHaveBeenCalled();
       expect(result).toEqual({ id: 'file-1', status: 'READY' });
     });
 
     it('rejects when the object does not exist in storage', async () => {
-      prisma.file.findUnique.mockResolvedValue({
+      prisma.media.findUnique.mockResolvedValue({
         id: 'file-1',
-        userId: 'user-1',
+        uploadedBy: 'user-1',
         status: 'UPLOADING',
         originalKey: 'users/user-1/photos/file-1/original',
         mimetype: 'image/jpeg',
@@ -293,21 +292,22 @@ describe('UploadsService', () => {
       storage.headObject.mockResolvedValue({ exists: false, size: null, contentType: null });
 
       await expect(service.complete('user-1', 'file-1')).rejects.toThrow(BadRequestException);
-      expect(prisma.file.update).not.toHaveBeenCalled();
+      expect(prisma.media.update).not.toHaveBeenCalled();
     });
   });
 
   describe('access control', () => {
     it('findOne returns 404 for another user media', async () => {
-      prisma.file.findUnique.mockResolvedValue({
+      prisma.media.findUnique.mockResolvedValue({
         id: 'file-1',
-        userId: 'user-B',
+        uploadedBy: 'user-B',
+        type: 'PHOTO',
         status: 'READY',
         originalKey: 'k',
         previewKey: null,
         mediumKey: null,
         mimetype: 'image/jpeg',
-        size: 10,
+        size: BigInt(10),
         width: null,
         height: null,
         duration: null,
@@ -317,15 +317,16 @@ describe('UploadsService', () => {
     });
 
     it('findOne returns Worker signed URLs for READY media', async () => {
-      prisma.file.findUnique.mockResolvedValue({
+      prisma.media.findUnique.mockResolvedValue({
         id: 'file-1',
-        userId: 'user-1',
+        uploadedBy: 'user-1',
+        type: 'PHOTO',
         status: 'READY',
         originalKey: 'users/user-1/photos/file-1/original',
         previewKey: 'users/user-1/photos/file-1/preview',
         mediumKey: 'users/user-1/photos/file-1/medium',
         mimetype: 'image/jpeg',
-        size: 10,
+        size: BigInt(10),
         width: 400,
         height: 300,
         duration: null,
@@ -347,15 +348,16 @@ describe('UploadsService', () => {
     });
 
     it('findOne returns null URLs for non-READY media', async () => {
-      prisma.file.findUnique.mockResolvedValue({
+      prisma.media.findUnique.mockResolvedValue({
         id: 'file-1',
-        userId: 'user-1',
+        uploadedBy: 'user-1',
+        type: 'PHOTO',
         status: 'UPLOADING',
         originalKey: 'users/user-1/photos/file-1/original',
         previewKey: 'users/user-1/photos/file-1/preview',
         mediumKey: 'users/user-1/photos/file-1/medium',
         mimetype: 'image/jpeg',
-        size: 10,
+        size: BigInt(10),
         width: 400,
         height: 300,
         duration: null,

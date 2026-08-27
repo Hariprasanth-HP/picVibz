@@ -15,10 +15,8 @@
 | Authentication    | Supabase Auth         |
 | Authorization     | NestJS Guards + RBAC  |
 | Object Storage    | Cloudflare R2         |
-| Message Broker    | RabbitMQ              |
-| Cache             | Redis                 |
-| Image Processing  | Sharp                 |
-| Realtime          | WebSocket Gateway     |
+| Image Processing  | Sharp (server) / Cloudflare Images (edge) |
+| Edge Delivery     | Cloudflare Workers    |
 | API Documentation | Swagger               |
 | Validation        | class-validator       |
 | Logging           | Pino                  |
@@ -35,30 +33,25 @@ React / React Native
         ▼
     NestJS API
         │
- ┌──────┴───────────────┐
- │                      │
- ▼                      ▼
+  ┌─────┴───────────────┐
+  │                     │
+  ▼                     ▼
 Supabase Auth      PostgreSQL
-                      │
-                  Prisma ORM
-                      │
-        ┌─────────────┴─────────────┐
-        ▼                           ▼
- Cloudflare R2                  RabbitMQ
-        │                           │
-        │                    Image Processor
-        │                    Notification Worker
-        │                    Cleanup Worker
-        │                    Analytics Worker
-        │
-        ▼
-      Redis
-        │
-        ▼
-   WebSocket Gateway
-        │
-        ▼
-      Frontend
+                       │
+                   Prisma ORM
+                       │
+         ┌─────────────┴─────────────┐
+         ▼                           ▼
+  Cloudflare R2              Cloudflare Worker
+         │                           │
+         │                    Image Transform
+         │                    (Cloudflare Images)
+         │                           │
+         ▼                           ▼
+      Signed URLs               CDN Delivery
+         │
+         ▼
+    Frontend
 ```
 
 ---
@@ -182,108 +175,97 @@ Return User
 
 # Upload Flow
 
+Two upload paths are supported:
+
+## Path A: Direct-to-R2 (Presigned URLs) — Primary for Large Files
+
 ```
-User Selects Photos
-
-↓
-
-Frontend Upload
-
-↓
-
-Upload Progress
-
-0% → 100%
-
-↓
-
-Cloudflare R2
-
-↓
-
-Save Metadata
-
-↓
-
-Publish RabbitMQ Message
-
-↓
-
-Return Success
+Client
+  │
+  ├─► POST /uploads/init {fileName, mimeType, size, eventId?}
+  │       │
+  │       └─► Returns {uploadId, uploadUrl, storageKey}
+  │
+  ├─► PUT {file} → uploadUrl (direct to Cloudflare R2)
+  │
+  └─► POST /uploads/:id/complete
+          │
+          └─► Verifies object in R2
+              │
+              └─► Updates status to READY
+                  │
+                  └─► Creates Photo record (if eventId)
+                      │
+                      └─► Returns signed URLs for all variants
 ```
 
-The upload is complete before RabbitMQ begins processing.
+## Path B: Server-Side Multipart — Simple/Small Files
+
+```
+Client
+  │
+  ├─► POST /files (multipart/form-data)
+  │       │
+  │       └─► Sharp processes image
+  │           ├─► Thumbnail (200px)
+  │           ├─► Preview (800px)
+  │           └─► Original
+  │
+  ├─► Uploads all 3 variants to R2
+  │
+  └─► Creates File record with status READY
+```
 
 ---
 
 # Image Processing Flow
 
-RabbitMQ processes uploaded images asynchronously.
+**On-demand transformation via Cloudflare Worker + Cloudflare Images** (no background queue):
 
 ```
-RabbitMQ
-
-↓
-
-Image Processor
-
-↓
-
-Download Original
-
-↓
-
-Generate Thumbnail
-
-↓
-
-Generate Medium Image
-
-↓
-
-Compress Image
-
-↓
-
-Extract EXIF Metadata
-
-↓
-
-Generate Blur Placeholder
-
-↓
-
-Upload Processed Images
-
-↓
-
-Update Database
-
-↓
-
-Notify Frontend
+Client Request
+  │
+  ├─► GET /image?key=...&size=thumbnail|preview|medium|original&exp=...&sig=...
+  │       │
+  │       └─► Cloudflare Worker validates signature & expiry
+  │           │
+  │           ├─► size=original → Stream directly from private R2
+  │           │
+  │           └─► size=thumbnail|preview|medium
+  │               │
+  │               └─► Cloudflare Images transform
+  │                   ├─► Resize (scale-down)
+  │                   ├─► Convert to WebP
+  │                   └─► Quality per variant
+  │
+  └─► Returns transformed image with caching headers
 ```
+
+**Variant Dimensions:**
+- **Thumbnail**: 300px width, WebP, quality 75
+- **Preview**: 1600px width, WebP, quality 80
+- **Medium**: 1600px width, WebP, quality 80
+- **Original**: Served as-is from R2
 
 ---
 
 # Image Versions
 
-Every uploaded image generates three versions.
+Every uploaded image has **four accessible variants** (generated on-demand):
 
 ```
-Original
-IMG_001.jpg
-
-↓
-
-Medium
-IMG_001_medium.webp
-
-↓
-
-Thumbnail
-IMG_001_thumb.webp
+Original (R2)
+  │
+  ├─► Thumbnail  ──► 300px WebP (quality 75)
+  ├─► Preview    ──► 1600px WebP (quality 80)
+  ├─► Medium     ──► 1600px WebP (quality 80)
+  └─► Original   ──► As uploaded
 ```
+
+Server-side upload (Path B) also pre-generates at upload time:
+- Thumbnail: 200px JPEG (quality 80)
+- Preview: 800px JPEG (quality 85)
+- Original: As uploaded
 
 ---
 
@@ -292,197 +274,23 @@ IMG_001_thumb.webp
 | Image     | Used For                        |
 | --------- | ------------------------------- |
 | Thumbnail | Gallery, Albums, Search Results |
-| Medium    | Photo Viewer                    |
+| Preview   | Photo Viewer (initial load)     |
+| Medium    | Photo Viewer (full screen)      |
 | Original  | Download, Zoom, Share           |
-
----
-
-# Gallery Flow
-
-Gallery loads thumbnails only.
-
-```
-Gallery
-
-↓
-
-Thumbnail
-
-↓
-
-Click Photo
-
-↓
-
-Medium Image
-
-↓
-
-Zoom
-
-↓
-
-Original Image
-```
-
-This minimizes bandwidth and improves scrolling performance.
-
----
-
-# RabbitMQ Workers
-
-## Image Processor
-
-Responsibilities
-
-* Generate Thumbnail
-* Compress Images
-* Convert to WebP
-* Generate Blur Placeholder
-* Extract EXIF
-* Update Database
-
----
-
-## Notification Worker
-
-Responsibilities
-
-* Album Shared
-* Upload Completed
-* Storage Warning
-* New Shared Photo
-
----
-
-## Cleanup Worker
-
-Responsibilities
-
-* Delete Temporary Files
-* Remove Expired Shares
-* Cleanup Failed Uploads
-
----
-
-## Analytics Worker
-
-Responsibilities
-
-* Storage Statistics
-* User Analytics
-* Daily Reports
-
----
-
-# Bulk Upload
-
-```
-User Selects 500 Photos
-
-↓
-
-Upload Progress
-
-↓
-
-Cloudflare R2
-
-↓
-
-Save Metadata
-
-↓
-
-RabbitMQ
-
-↓
-
-Parallel Image Processing
-
-↓
-
-Notify UI
-
-↓
-
-Ready
-```
-
----
-
-# Bulk Download
-
-```
-User Selects Photos
-
-↓
-
-Download Request
-
-↓
-
-RabbitMQ
-
-↓
-
-Create ZIP
-
-↓
-
-Upload ZIP to Cloudflare R2
-
-↓
-
-Notify User
-
-↓
-
-Download ZIP
-```
 
 ---
 
 # Database Status
 
-Photo Status
+`File.status` (MediaStatus enum):
 
 ```
-UPLOADING
-
-↓
-
-UPLOADED
-
-↓
-
-PROCESSING
-
-↓
-
-READY
-
-↓
-
-FAILED
+UPLOADING   →  Initial record created, awaiting client upload
+READY       →  Upload verified, accessible via signed URLs
+FAILED      →  Error during upload/processing (optional)
 ```
 
----
-
-# Redis
-
-Redis is used for
-
-* API Caching
-* Rate Limiting
-* Session Cache
-* Frequently Accessed Metadata
-* WebSocket Presence
-* Temporary Upload Cache
-
-Redis is **not** used as a message queue.
-
-RabbitMQ handles all asynchronous messaging.
+> Note: `UPLOADED` and `PROCESSING` states exist in enum but are not used in current flows. Processing is on-demand at delivery time.
 
 ---
 
@@ -490,34 +298,44 @@ RabbitMQ handles all asynchronous messaging.
 
 ```
 users/
-
-    user-id/
-
-        originals/
-
-        medium/
-
-        thumbnails/
-
-        downloads/
-
-        avatars/
+    {userId}/
+        photos/
+            {fileId}/
+                original      (original upload)
 ```
+
+> Processed variants are **not stored** in R2. They are generated on-demand by Cloudflare Images and cached at the edge.
+
+---
+
+# Image Delivery (Cloudflare Worker)
+
+Deployed at `worker.js` — serves signed, expiring URLs:
+
+**Security:**
+- HMAC-SHA256 signed URLs (`key`, `size`, `exp` covered)
+- Short TTL (default 300s / 5 min)
+- Key pattern restricted: `^users\/[^/]+\/photos\/[^/]+\/original$`
+- Private R2 bucket — no public access
+
+**Response Headers:**
+- `Cache-Control: private, max-age=300`
+- `Access-Control-Allow-Origin: *`
+- `Content-Type: image/webp` (transformed) or original mime type
 
 ---
 
 # Security
 
-* JWT Authentication
+* JWT Authentication (Supabase)
 * Role Based Access Control
 * Permission Based Authorization
 * HTTPS Only
-* Secure Object Storage
-* Signed Download URLs
-* DTO Validation
+* Private Object Storage (R2)
+* Signed Download URLs with HMAC + Expiry
+* DTO Validation (class-validator)
 * Global Exception Filters
 * Request Rate Limiting
-* Audit Logging
 
 ---
 
@@ -525,30 +343,40 @@ users/
 
 ```
 src/
-
 ├── auth/
-├── users/
-├── photos/
-├── albums/
-├── uploads/
-├── storage/
-├── rabbitmq/
-├── workers/
-│
-├── websocket/
-├── notifications/
-├── analytics/
+├── uploads/          # Direct-to-R2 presigned upload flow
+├── files/            # Server-side multipart upload + Sharp processing
+├── storage/          # R2 client + presigned URL generation
+├── photos/           # Photo queries (with signed URLs)
+├── events/           # Event/album management
 ├── prisma/
-├── redis/
 ├── common/
-│
+│   ├── guards/
+│   ├── pipes/
+│   ├── utils/        # image-url-signer.ts (HMAC signing)
+│   ├── interceptors/
+│   └── filters/
+├── supabase/         # Supabase client wrapper
 ├── config/
 └── main.ts
 ```
 
 ---
 
-# Future Features
+# Architecture Principles
+
+* Authentication handled by Supabase.
+* Authorization handled by NestJS.
+* Metadata stored in PostgreSQL using Prisma.
+* Original images stored in **private** Cloudflare R2.
+* **No background queue** — image transformations happen on-demand at the edge via Cloudflare Worker + Cloudflare Images.
+* Processed variants are **not persisted** — generated and cached by Cloudflare CDN.
+* Signed URLs with short TTL enforce access control.
+* Two upload paths: direct-to-R2 (scalable) and server-side (simple).
+
+---
+
+# Future / Planned Features
 
 * AI Search
 * Face Recognition
@@ -565,22 +393,12 @@ src/
 * Device Backup
 * End-to-End Encryption
 * Storage Saver Mode
-
----
-
-# Architecture Principles
-
-* Authentication handled by Supabase.
-* Authorization handled by NestJS.
-* Metadata stored in PostgreSQL using Prisma.
-* Original and processed images stored in Cloudflare R2.
-* RabbitMQ manages all asynchronous background processing.
-* Redis provides caching and high-performance data access.
-* WebSockets deliver real-time upload and processing updates.
-* Image processing is fully decoupled from the upload API to ensure fast responses and horizontal scalability.
+* **Background Workers (RabbitMQ)** — for async tasks like bulk operations, notifications, analytics
+* **Redis Caching** — for metadata, sessions, rate limiting
+* **WebSocket Gateway** — for real-time upload/processing progress
 
 ---
 
 # Project Goal
 
-**PicVibz** is designed as an enterprise-grade, cloud-native photo management platform capable of handling millions of photos through a scalable microservice-inspired architecture. The system emphasizes performance, security, extensibility, and a seamless user experience while remaining modular enough to support future AI-powered capabilities.
+**PicVibz** is designed as a cloud-native photo management platform capable of handling millions of photos through a scalable architecture. The system emphasizes performance, security, extensibility, and a seamless user experience while remaining modular enough to support future AI-powered capabilities. Current implementation leverages Cloudflare's edge network for zero-ops image processing and global delivery.

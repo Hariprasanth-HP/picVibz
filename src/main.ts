@@ -16,6 +16,13 @@ async function bootstrap() {
   app.setGlobalPrefix('api/v1');
   app.enableShutdownHooks();
 
+  const httpAdapter = app.getHttpAdapter();
+  httpAdapter
+    .getInstance?.()
+    .set('json replacer', (_key: string, value: unknown) =>
+      typeof value === 'bigint' ? Number(value) : value,
+    );
+
   const corsOrigin = (process.env.CORS_ORIGIN || '*').split(',').map((o) => o.trim());
 
   const corsOptions: CorsOptions = {

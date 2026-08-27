@@ -1,9 +1,23 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// This is your Prisma schema file.
+// Learn more about Prisma: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider      = "prisma-client-js"
+  provider = "prisma-client-js"
   binaryTargets = ["native", "debian-openssl-3.0.x", "linux-arm64-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum MediaType {
+  PHOTO
+  VIDEO
 }
 
 enum MediaStatus {
@@ -14,92 +28,86 @@ enum MediaStatus {
   FAILED
 }
 
-datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-}
+// ─────────────────────────────────────────────
+// USER
+// ─────────────────────────────────────────────
 
 model User {
-  id          String   @id @default(cuid())
-  supabaseUid String?  @unique
-  email       String   @unique
+  id          String    @id @default(cuid())
+  supabaseUid String?   @unique
+  email       String    @unique
   displayName String
   photoURL    String?
-  role        String   @default("user")
-  eventPasses Int      @default(0)
-  autoUpload  Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  role        String    @default("user")
+  eventPasses Int       @default(0)
+  autoUpload  Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  photos Photo[]
+  uploadedMedia Media[]
+  createdEvents Event[] @relation("EventCreator")
 
   @@index([email])
   @@index([supabaseUid])
 }
 
-
+// ─────────────────────────────────────────────
+// EVENT
+// ─────────────────────────────────────────────
 
 model Event {
-  id         String   @id @default(cuid())
-  name       String
-  type       String   @default("Other")
-  date       String   @default("TBD")
-  startDate  DateTime?
-  endDate    DateTime?
-  location   String   @default("TBD")
-  coverImage String   @default("")
-  createdBy  String
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String    @id @default(cuid())
+  name      String
+  type      String    @default("Other")
+  date      DateTime?
+  startDate DateTime?
+  endDate   DateTime?
+  location  String?
+  createdBy String
 
-  photos Photo[]
-  files  File[]
+  creator User @relation("EventCreator", fields: [createdBy], references: [id])
+
+  media Media[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([createdBy])
+  @@index([date])
 }
 
-model File {
-  id            String      @id @default(cuid())
-  originalName  String
-  mimetype      String
-  size          Int
-  width         Int?
-  height        Int?
-  originalUrl   String
-  previewUrl    String
-  thumbnailUrl  String
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+// ─────────────────────────────────────────────
+// MEDIA
+// ─────────────────────────────────────────────
 
-  userId          String?
-  originalKey     String?
+model Media {
+  id              String      @id @default(cuid())
+  type            MediaType
+  originalName    String?
+  mimetype        String
+  size            BigInt
+  width           Int?
+  height          Int?
+  duration        BigInt?
+  originalKey     String
   mediumKey       String?
   previewKey      String?
-  duration        Int?
-  processingError String?
+  thumbnailKey    String?
+  videoMp4Key     String?
+  posterKey       String?
+  previewGifKey   String?
   status          MediaStatus @default(UPLOADING)
-
-  eventId String?
-  event   Event?  @relation(fields: [eventId], references: [id], onDelete: SetNull)
-
-  photo Photo?
-
-  @@index([userId])
-  @@index([status])
-  @@index([eventId])
-}
-
-model Photo {
-  id         String   @id @default(cuid())
-  eventId    String
-  fileId     String   @unique
-  uploadedBy String
-  createdAt  DateTime @default(now())
-
-  event Event @relation(fields: [eventId], references: [id])
-  file  File  @relation(fields: [fileId], references: [id])
-  user  User  @relation(fields: [uploadedBy], references: [id])
+  processingError String?
+  uploadedBy      String
+  uploader        User        @relation(fields: [uploadedBy], references: [id])
+  eventId         String?
+  event           Event?      @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
 
   @@index([eventId])
   @@index([uploadedBy])
+  @@index([status])
+  @@index([eventId, type])
+  @@index([eventId, status])
 }

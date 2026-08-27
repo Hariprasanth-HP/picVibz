@@ -23,8 +23,4 @@ export class CreateEventDto {
   @IsString()
   @IsOptional()
   location?: string;
-
-  @IsString()
-  @IsOptional()
-  coverImage?: string;
 }

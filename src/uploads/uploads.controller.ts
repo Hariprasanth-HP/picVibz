@@ -4,14 +4,17 @@ import {
   Get,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Request,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { InternalApiGuard } from '../common/guards/internal-api.guard';
 import { UploadsService } from './uploads.service';
 import { InitUploadDto } from './dto/init-upload.dto';
+import { VideoCompleteDto } from './dto/video-process.dto';
 
 @ApiTags('Uploads')
 @Controller('uploads')
@@ -30,6 +33,13 @@ export class UploadsController {
   @ApiOperation({ summary: 'Complete an upload and enqueue processing' })
   complete(@Param('uploadId', ParseUUIDPipe) uploadId: string, @Request() req: any) {
     return this.uploads.complete(req.user.id, uploadId);
+  }
+
+  @Patch('internal/:id/complete')
+  @UseGuards(InternalApiGuard)
+  @ApiOperation({ summary: 'Internal: Complete video processing from worker' })
+  completeFromWorker(@Param('id', ParseUUIDPipe) id: string, @Body() dto: VideoCompleteDto) {
+    return this.uploads.completeFromWorker(id, dto);
   }
 
   @Get()

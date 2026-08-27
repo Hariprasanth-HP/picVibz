@@ -6,12 +6,14 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
-import type { File as MediaFile } from '@prisma/client';
+import type { Media as PrismaMedia } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { ImageUrlSigner } from '../common/utils/image-url-signer';
+import { VideoUrlSigner } from '../common/utils/video-url-signer';
+import { VideoQueueService } from '../queues/video.queue';
 import { InitUploadDto } from './dto/init-upload.dto';
-import { isAllowedMimeType } from './media.constants';
+import { isAllowedMimeType, isVideoMimeType } from './media.constants';
 
 @Injectable()
 export class UploadsService {
@@ -20,6 +22,8 @@ export class UploadsService {
     private readonly storage: StorageService,
     private readonly config: ConfigService,
     private readonly urlSigner: ImageUrlSigner,
+    private readonly videoSigner: VideoUrlSigner,
+    private readonly videoQueue: VideoQueueService,
   ) {}
 
   private get uploadMaxSize(): number {
@@ -52,18 +56,16 @@ export class UploadsService {
     const fileId = randomUUID();
     const originalKey = this.storage.buildKey(userId, fileId, 'original');
 
-    const file = await this.prisma.file.create({
+    const media = await this.prisma.media.create({
       data: {
         id: fileId,
-        userId,
+        type: isVideoMimeType(dto.mimeType) ? 'VIDEO' : 'PHOTO',
+        uploadedBy: userId,
         originalName: dto.fileName,
         mimetype: dto.mimeType,
-        size: dto.size,
+        size: BigInt(dto.size),
         status: 'UPLOADING',
-        originalKey,
-        originalUrl: originalKey,
-        previewUrl: '',
-        thumbnailUrl: '',
+        originalKey: originalKey,
         ...(eventId ? { eventId } : {}),
       },
     });
@@ -75,85 +77,149 @@ export class UploadsService {
     );
 
     return {
-      uploadId: file.id,
-      fileId: file.id,
+      uploadId: media.id,
+      fileId: media.id,
       uploadUrl,
       storageKey: originalKey,
-      status: file.status,
+      status: media.status,
     };
   }
 
   async complete(userId: string, uploadId: string) {
-    const file = await this.prisma.file.findUnique({
+    const media = await this.prisma.media.findUnique({
       where: { id: uploadId },
     });
-    if (!file || file.userId !== userId) {
+    if (!media || media.uploadedBy !== userId) {
       throw new NotFoundException('Upload not found');
     }
 
-    if (file.status === 'READY') {
-      return { id: file.id, status: file.status };
+    if (media.status === 'READY') {
+      return { id: media.id, status: media.status };
     }
 
-    if (!file.originalKey) {
+    if (!media.originalKey) {
       throw new BadRequestException('Upload is missing a storage key');
     }
 
-    const head = await this.storage.headObject(file.originalKey);
+    const head = await this.storage.headObject(media.originalKey);
     if (!head.exists) {
       throw new BadRequestException('Uploaded object not found in storage');
     }
 
-    if (file.eventId) {
-      const existing = await this.prisma.photo.findUnique({
-        where: { fileId: file.id },
+    if (isVideoMimeType(media.mimetype)) {
+      await this.prisma.media.update({
+        where: { id: media.id },
+        data: { status: 'PROCESSING' },
       });
-      if (!existing) {
-        await this.prisma.photo.create({
-          data: {
-            eventId: file.eventId,
-            fileId: file.id,
-            uploadedBy: userId,
-          },
-        });
-      }
+
+      await this.videoQueue.enqueueVideoProcessing({
+        fileId: media.id,
+        originalKey: media.originalKey,
+        mimeType: media.mimetype,
+        userId,
+      });
+
+      return { id: media.id, status: 'PROCESSING' };
     }
 
-    await this.prisma.file.update({
-      where: { id: file.id },
+    await this.prisma.media.update({
+      where: { id: media.id },
+      data: { status: 'READY' },
+    });
+
+    return { id: media.id, status: 'READY' };
+  }
+
+  async completeFromWorker(
+    fileId: string,
+    dto: {
+      videoMp4Key: string;
+      posterKey: string;
+      previewGifKey: string;
+      duration: number;
+      width: number;
+      height: number;
+    },
+  ) {
+    const media = await this.prisma.media.findUnique({ where: { id: fileId } });
+    if (!media) {
+      throw new NotFoundException('Upload not found');
+    }
+
+    await this.prisma.media.update({
+      where: { id: fileId },
       data: {
         status: 'READY',
-        width: head.contentType?.startsWith('image/') ? null : null,
-        height: head.contentType?.startsWith('image/') ? null : null,
+        videoMp4Key: dto.videoMp4Key,
+        posterKey: dto.posterKey,
+        previewGifKey: dto.previewGifKey,
+        duration: BigInt(dto.duration),
+        width: dto.width,
+        height: dto.height,
       },
     });
 
-    return { id: file.id, status: 'READY' };
+    return { id: fileId, status: 'READY' };
   }
 
   async findAll(userId: string) {
-    const files = await this.prisma.file.findMany({
-      where: { userId },
+    const media = await this.prisma.media.findMany({
+      where: { uploadedBy: userId },
       orderBy: { createdAt: 'desc' },
     });
-    return Promise.all(files.map((file) => this.toMediaResponse(file)));
+    return media.map((m) => this.toMediaResponse(m));
   }
 
   async findOne(userId: string, id: string) {
-    const file = await this.prisma.file.findUnique({ where: { id } });
-    if (!file || file.userId !== userId) {
+    const media = await this.prisma.media.findUnique({ where: { id } });
+    if (!media || media.uploadedBy !== userId) {
       throw new NotFoundException('Media not found');
     }
-    return this.toMediaResponse(file);
+    return this.toMediaResponse(media);
   }
 
-  private toMediaResponse(file: MediaFile) {
-    const ready = file.status === 'READY';
+  private toMediaResponse(media: PrismaMedia) {
+    const ready = media.status === 'READY';
+    const isVideo = media.type === 'VIDEO';
+
+    if (isVideo) {
+      const urls =
+        ready && media.originalKey && media.videoMp4Key
+          ? this.videoSigner.signAll(media.originalKey, {
+              videoKey: media.videoMp4Key,
+              posterKey: media.posterKey ?? null,
+              previewKey: media.previewGifKey ?? null,
+              expiresInSeconds: this.signedUrlExpiration,
+            })
+          : {
+              videoUrl: null,
+              posterUrl: null,
+              previewUrl: null,
+            };
+
+      return {
+        id: media.id,
+        eventId: media.eventId,
+        status: media.status,
+        type: media.type,
+        mimeType: media.mimetype,
+        size: Number(media.size),
+        width: media.width,
+        height: media.height,
+        duration: media.duration !== null ? Number(media.duration) : null,
+        videoUrl: urls.videoUrl,
+        posterUrl: urls.posterUrl,
+        previewUrl: urls.previewUrl,
+        createdAt: media.createdAt,
+        updatedAt: media.updatedAt,
+      };
+    }
+
     const urls =
-      ready && file.originalKey
-        ? this.urlSigner.signAll(file.originalKey, {
-            mediumKey: file.mediumKey ?? null,
-            previewKey: file.previewKey ?? null,
+      ready && media.originalKey
+        ? this.urlSigner.signAll(media.originalKey, {
+            mediumKey: media.mediumKey ?? null,
+            previewKey: media.previewKey ?? null,
             expiresInSeconds: this.signedUrlExpiration,
           })
         : {
@@ -164,20 +230,21 @@ export class UploadsService {
           };
 
     return {
-      id: file.id,
-      eventId: file.eventId,
-      status: file.status,
-      mimeType: file.mimetype,
-      size: file.size,
-      width: file.width,
-      height: file.height,
-      duration: file.duration,
+      id: media.id,
+      eventId: media.eventId,
+      status: media.status,
+      type: media.type,
+      mimeType: media.mimetype,
+      size: Number(media.size),
+      width: media.width,
+      height: media.height,
+      duration: media.duration !== null ? Number(media.duration) : null,
       previewUrl: urls.previewUrl,
       mediumUrl: urls.mediumUrl,
       originalUrl: urls.originalUrl,
       thumbnailUrl: urls.thumbnailUrl,
-      createdAt: file.createdAt,
-      updatedAt: file.updatedAt,
+      createdAt: media.createdAt,
+      updatedAt: media.updatedAt,
     };
   }
 }

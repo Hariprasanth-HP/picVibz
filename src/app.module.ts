@@ -5,7 +5,6 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { PrismaModule } from './prisma/prisma.module';
 import { SupabaseModule } from './supabase/supabase.module';
 import { HealthModule } from './health/health.module';
-import { FilesModule } from './files/files.module';
 import { PhotosModule } from './photos/photos.module';
 import { StorageModule } from './storage/storage.module';
 import { AuthModule } from './auth/auth.module';
@@ -30,7 +29,6 @@ import { UploadsModule } from './uploads/uploads.module';
     AuthModule,
     EventsModule,
     StorageModule,
-    FilesModule,
     PhotosModule,
     UploadsModule,
   ],

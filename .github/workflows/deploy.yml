@@ -111,6 +111,11 @@ jobs:
               exit 1
             fi
 
+            if ! grep -q '^VIDEO_WORKER_URL=' .env; then
+              echo "ERROR: VIDEO_WORKER_URL missing from EC2 .env"
+              exit 1
+            fi
+
             echo "Required environment configuration found"
 
             # ------------------------------------------------
@@ -151,9 +156,9 @@ jobs:
             sudo docker compose ps
 
   # ============================================================
-  # DEPLOY CLOUDFLARE WORKER
+  # DEPLOY CLOUDFLARE WORKERS (Images + Videos)
   # ============================================================
-  deploy-worker:
+  deploy-workers:
     runs-on: ubuntu-latest
 
     steps:
@@ -170,6 +175,9 @@ jobs:
           CLOUDFLARE_API_TOKEN=$(grep '^CLOUDFLARE_API_TOKEN=' .env | cut -d '=' -f2-)
           CLOUDFLARE_ACCOUNT_ID=$(grep '^CLOUDFLARE_ACCOUNT_ID=' .env | cut -d '=' -f2-)
           IMAGE_SIGNING_SECRET=$(grep '^IMAGE_SIGNING_SECRET=' .env | cut -d '=' -f2-)
+          INTERNAL_API_KEY=$(grep '^INTERNAL_API_KEY=' .env | cut -d '=' -f2-)
+          NESTJS_INTERNAL_URL=$(grep '^NESTJS_INTERNAL_URL=' .env | cut -d '=' -f2-)
+          VIDEO_QUEUE_TOKEN=$(grep '^VIDEO_QUEUE_TOKEN=' .env | cut -d '=' -f2-)
 
           if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
             echo "ERROR: CLOUDFLARE_API_TOKEN missing"
@@ -186,10 +194,18 @@ jobs:
             exit 1
           fi
 
+          if [ -z "$INTERNAL_API_KEY" ]; then
+            echo "ERROR: INTERNAL_API_KEY missing"
+            exit 1
+          fi
+
           {
             echo "CLOUDFLARE_API_TOKEN=$CLOUDFLARE_API_TOKEN"
             echo "CLOUDFLARE_ACCOUNT_ID=$CLOUDFLARE_ACCOUNT_ID"
             echo "IMAGE_SIGNING_SECRET=$IMAGE_SIGNING_SECRET"
+            echo "INTERNAL_API_KEY=$INTERNAL_API_KEY"
+            echo "NESTJS_INTERNAL_URL=$NESTJS_INTERNAL_URL"
+            echo "VIDEO_QUEUE_TOKEN=$VIDEO_QUEUE_TOKEN"
           } >> "$GITHUB_ENV"
 
       - name: Setup pnpm
@@ -213,43 +229,45 @@ jobs:
         run: wrangler --version
 
       # --------------------------------------------------------
-      # Create Wrangler config with R2 binding
+      # Deploy Image Worker
       # --------------------------------------------------------
-      - name: Create Wrangler config
+      - name: Deploy Image Worker
         run: |
-          cat > wrangler.toml <<'EOF'
-          name = "picvibz-image-delivery"
-          main = "worker.js"
-          compatibility_date = "2026-08-26"
+          wrangler deploy -c wrangler-images.toml --env production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ env.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
 
-          [env.production]
-          name = "picvibz-image-delivery"
-
-          [[env.production.r2_buckets]]
-          binding = "IMAGES"
-          bucket_name = "picvibz"
-          EOF
-
-          echo "Wrangler configuration created"
-
-      # --------------------------------------------------------
-      # Upload secret to Cloudflare Worker
-      # --------------------------------------------------------
-      - name: Set Worker secret
+      - name: Set Image Worker Secret
         run: |
           printf '%s' "$IMAGE_SIGNING_SECRET" | \
             wrangler secret put IMAGE_SIGNING_SECRET \
+            -c wrangler-images.toml \
             --env production
         env:
           CLOUDFLARE_API_TOKEN: ${{ env.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
 
       # --------------------------------------------------------
-      # Deploy Worker
+      # Deploy Video Worker
       # --------------------------------------------------------
-      - name: Deploy Worker
+      - name: Deploy Video Worker
         run: |
-          wrangler deploy --env production
+          wrangler deploy -c wrangler-videos.toml --env production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ env.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Set Video Worker Secrets
+        run: |
+          printf '%s' "$IMAGE_SIGNING_SECRET" | \
+            wrangler secret put IMAGE_SIGNING_SECRET \
+            -c wrangler-videos.toml \
+            --env production
+          printf '%s' "$INTERNAL_API_KEY" | \
+            wrangler secret put INTERNAL_API_KEY \
+            -c wrangler-videos.toml \
+            --env production
         env:
           CLOUDFLARE_API_TOKEN: ${{ env.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ env.CLOUDFLARE_ACCOUNT_ID }}

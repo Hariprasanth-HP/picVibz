@@ -6,9 +6,6 @@ import { StorageService } from '../storage/storage.service';
 import { ImageUrlSigner } from '../common/utils/image-url-signer';
 import { randomUUID } from 'crypto';
 
-const THUMB_WIDTH = 200;
-const PREVIEW_WIDTH = 800;
-
 @Injectable()
 export class PhotosService {
   constructor(
@@ -37,38 +34,32 @@ export class PhotosService {
 
     await this.storage.upload(originalKey, file.buffer, file.mimetype);
 
-    const fileRecord = await this.prisma.file.create({
+    const created = await this.prisma.media.create({
       data: {
         id,
-        userId,
+        type: 'PHOTO',
+        uploadedBy: userId,
+        eventId,
         originalName: file.originalname,
         mimetype: file.mimetype,
-        size: file.size,
+        size: BigInt(file.size),
         width: metadata.width ?? null,
         height: metadata.height ?? null,
         originalKey,
-        originalUrl: originalKey,
-        previewUrl: '',
-        thumbnailUrl: '',
         status: 'READY',
       },
-    });
-
-    const photo = await this.prisma.photo.create({
-      data: {
-        eventId,
-        fileId: id,
-        uploadedBy: userId,
-      },
       include: {
-        file: true,
-        user: {
+        uploader: {
           select: { id: true, displayName: true, photoURL: true },
         },
       },
     });
 
-    return photo;
+    return {
+      ...created,
+      size: Number(created.size),
+      duration: created.duration !== null ? Number(created.duration) : null,
+    };
   }
 
   async findByEvent(eventId: string, userId: string) {
@@ -79,11 +70,10 @@ export class PhotosService {
       throw new NotFoundException('Event not found');
     }
 
-    const photos = await this.prisma.photo.findMany({
-      where: { eventId },
+    const media = await this.prisma.media.findMany({
+      where: { eventId, type: 'PHOTO' },
       include: {
-        file: true,
-        user: {
+        uploader: {
           select: { id: true, displayName: true, photoURL: true },
         },
       },
@@ -91,41 +81,40 @@ export class PhotosService {
     });
 
     const expiration = Number(this.config.get('SIGNED_URL_EXPIRATION', '300'));
-    return Promise.all(
-      photos.map(async (photo) => {
-        const file = photo.file;
-        if (!file.originalKey) {
-          return photo;
-        }
+    return media.map((item) => {
+      const normalized = {
+        ...item,
+        size: Number(item.size),
+        duration: item.duration !== null ? Number(item.duration) : null,
+      };
 
-        const ready = file.status === 'READY';
-        const urls =
-          ready && file.originalKey
-            ? this.urlSigner.signAll(file.originalKey, {
-                mediumKey: file.mediumKey ?? null,
-                previewKey: file.previewKey ?? null,
-                expiresInSeconds: expiration,
-              })
-            : {
-                originalUrl: null,
-                mediumUrl: null,
-                previewUrl: null,
-                thumbnailUrl: null,
-              };
+      if (!normalized.originalKey) {
+        return normalized;
+      }
 
-        return {
-          ...photo,
-          file: {
-            ...file,
-            status: file.status,
-            originalUrl: urls.originalUrl,
-            previewUrl: urls.previewUrl,
-            thumbnailUrl: urls.thumbnailUrl,
-            mediumUrl: urls.mediumUrl,
-          },
-        };
-      }),
-    );
+      const ready = item.status === 'READY';
+      const urls =
+        ready && item.originalKey
+          ? this.urlSigner.signAll(item.originalKey, {
+              mediumKey: item.mediumKey ?? null,
+              previewKey: item.previewKey ?? null,
+              expiresInSeconds: expiration,
+            })
+          : {
+              originalUrl: null,
+              mediumUrl: null,
+              previewUrl: null,
+              thumbnailUrl: null,
+            };
+
+      return {
+        ...normalized,
+        originalUrl: urls.originalUrl,
+        previewUrl: urls.previewUrl,
+        thumbnailUrl: urls.thumbnailUrl,
+        mediumUrl: urls.mediumUrl,
+      };
+    });
   }
 
   async remove(eventId: string, photoId: string, userId: string) {
@@ -136,31 +125,22 @@ export class PhotosService {
       throw new NotFoundException('Event not found');
     }
 
-    const photo = await this.prisma.photo.findFirst({
-      where: { id: photoId, eventId },
-      include: { file: true },
+    const media = await this.prisma.media.findFirst({
+      where: { id: photoId, eventId, type: 'PHOTO' },
     });
-    if (!photo) {
+    if (!media) {
       throw new NotFoundException('Photo not found');
     }
 
     const keys = new Set<string>();
-    if (photo.file.originalKey) {
-      keys.add(photo.file.originalKey);
-      if (photo.file.previewKey) keys.add(photo.file.previewKey);
-      if (photo.file.mediumKey) keys.add(photo.file.mediumKey);
-    } else {
-      keys.add(`uploads/${photo.fileId}/original.jpg`);
-      keys.add(`uploads/${photo.fileId}/preview.jpg`);
-      keys.add(`uploads/${photo.fileId}/thumbnail.jpg`);
-    }
+    if (media.originalKey) keys.add(media.originalKey);
+    if (media.previewKey) keys.add(media.previewKey);
+    if (media.mediumKey) keys.add(media.mediumKey);
+    if (media.thumbnailKey) keys.add(media.thumbnailKey);
 
     await Promise.all([...keys].map((key) => this.storage.delete(key)));
 
-    await this.prisma.$transaction([
-      this.prisma.photo.delete({ where: { id: photo.id } }),
-      this.prisma.file.delete({ where: { id: photo.fileId } }),
-    ]);
+    await this.prisma.media.delete({ where: { id: media.id } });
 
     return { message: 'Photo deleted successfully' };
   }

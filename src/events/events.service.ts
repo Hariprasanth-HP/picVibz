@@ -12,11 +12,10 @@ export class EventsService {
       data: {
         name: dto.name,
         type: dto.type ?? 'Other',
-        date: dto.date ?? 'TBD',
+        date: dto.date ? new Date(dto.date) : null,
         startDate: dto.startDate ? new Date(dto.startDate) : null,
         endDate: dto.endDate ? new Date(dto.endDate) : null,
-        location: dto.location ?? 'TBD',
-        coverImage: dto.coverImage ?? '',
+        location: dto.location ?? null,
         createdBy: userId,
       },
     });
@@ -46,11 +45,12 @@ export class EventsService {
       data: {
         ...(dto.name !== undefined && { name: dto.name }),
         ...(dto.type !== undefined && { type: dto.type }),
-        ...(dto.date !== undefined && { date: dto.date }),
-        ...(dto.startDate !== undefined && { startDate: new Date(dto.startDate) }),
-        ...(dto.endDate !== undefined && { endDate: new Date(dto.endDate) }),
-        ...(dto.location !== undefined && { location: dto.location }),
-        ...(dto.coverImage !== undefined && { coverImage: dto.coverImage }),
+        ...(dto.date !== undefined && { date: dto.date ? new Date(dto.date) : null }),
+        ...(dto.startDate !== undefined && {
+          startDate: dto.startDate ? new Date(dto.startDate) : null,
+        }),
+        ...(dto.endDate !== undefined && { endDate: dto.endDate ? new Date(dto.endDate) : null }),
+        ...(dto.location !== undefined && { location: dto.location ?? null }),
       },
     });
   }
